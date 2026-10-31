@@ -12,7 +12,7 @@ Spring Boot 4.1 project from Initializr, docker-compose Postgres, Testcontainers
 
 ---
 
-## M1: Domain model and CRUD
+## M1: Domain model and CRUD (done)
 
 **Goal:** the API stores brands, locations, and campaigns, with real validation and consistent errors. No AI yet.
 

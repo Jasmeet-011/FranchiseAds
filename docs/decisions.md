@@ -85,3 +85,27 @@ Short ADRs. Each has context, the decision, and its consequences. Newest at the 
 ## ADR-014: Load `.env` for local runs
 
 **Decision:** `spring.config.import: optional:file:.env[.properties]`, so local runs read `./.env`; it's optional, so CI and AWS run without one, and real environment variables still override it.
+
+## ADR-015: Case-insensitive brand names enforced by a unique index on `lower(name)`
+
+**Context:** "Acme" and "acme" are the same brand to a human. An exists-then-insert check in the service races: two concurrent requests both see "not found" and both insert.
+**Decision:** `create unique index uq_brand_name_lower on brand (lower(name))` in V1 is the only uniqueness check. The service calls `saveAndFlush` so a duplicate fails inside the request; `GlobalExceptionHandler` maps a `DataIntegrityViolationException` whose Hibernate `ConstraintViolationException` is `UNIQUE` on `uq_brand_name_lower` (Postgres reports the index name as the constraint name) to 409.
+**Consequences:** Correct under concurrency, one source of truth. A failed insert still consumes an identity value, and Hibernate logs each duplicate at WARN (`HHH000247`). Other integrity violations are not mapped: request validation should prevent them, so they return a generic 500 and are logged at ERROR as bugs. A new unique constraint needs an entry in the handler's map to become a 409.
+
+## ADR-016: `ddl-auto: validate` does not check array columns, so array mappings need round-trip tests
+
+**Context:** Hibernate 7.4 maps `List<String>` to `text[]` with or without `@JdbcTypeCode(SqlTypes.ARRAY)`. A spike showed that `validate` accepts a `varchar` column for such a field (with or without the annotation): startup and inserts succeed, and only reads fail. It does reject e.g. `varchar` for an `int` field.
+**Decision:** Keep `@JdbcTypeCode(SqlTypes.ARRAY)` to make the intent explicit, and require a Testcontainers round-trip test for every array column, including an empty list (`PersistenceMappingTests`).
+**Consequences:** Array column changes are guarded by tests, not by startup validation. Adding an array column without a round-trip test is a review failure.
+
+## ADR-017: Normalize request input before validation
+
+**Context:** Without normalization, `" Acme"` would dodge the case-insensitive unique index, an empty optional field would be stored as `""` in one row and `null` in another, and duplicate banned words (`"Cheap"`, `"cheap"`) would be noise for the M3 validator and count against the list limit.
+**Decision:** Request records normalize in their compact constructors, before Bean Validation runs: strings are stripped, blank optional fields become null, and banned words default to `[]` and are de-duplicated ignoring case (first spelling kept). Size limits apply to the normalized values.
+**Consequences:** Stored data is clean and the 50-entry limit counts distinct words. A client sending `["Cheap", "cheap"]` gets back `["Cheap"]` without an error.
+
+## ADR-018: Nested endpoints return 404 for an unknown parent
+
+**Context:** `GET /brands/{brandId}/locations` for a brand that doesn't exist could return `[]`, which is indistinguishable from a real brand with no locations.
+**Decision:** Every `/brands/{brandId}/...` endpoint (create and list) loads the brand first and returns 404 if it is missing.
+**Consequences:** Clients can tell a typo from an empty list, at the cost of one extra primary-key lookup per list call.

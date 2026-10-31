@@ -135,18 +135,21 @@ All errors are `ProblemDetail` (RFC 9457). Internal details and stack traces are
 
 | Situation | Status |
 |---|---|
-| Bean validation failure | 400, with per-field errors |
+| Bean validation failure | 400, with per-field errors: `"errors": [{"field": "bannedWords[1]", "message": "must not be blank"}]`, sorted by field |
 | Unreadable JSON request body | 400 |
-| Brand, location, campaign, or variant not found | 404 |
+| Missing request parameter, non-numeric path ID | 400 |
+| Unknown path | 404 |
+| Wrong HTTP method / unsupported content type | 405 / 415 |
+| Brand, location, campaign, or variant not found (including the parent brand of a nested create or list) | 404 |
 | Location doesn't belong to the campaign's brand | 422 |
-| Duplicate brand name | 409 |
+| Duplicate brand name, ignoring case (`uq_brand_name_lower`) | 409 |
 | Illegal status transition, or submitting a flagged variant | 409 |
 | Concurrent modification (`@Version`) | 409 |
 | Model output malformed on both attempts | 502 |
 | Claude rejected our request (non-retryable 4xx, e.g. bad key) | 502, logged at ERROR |
 | Claude 429 or 5xx after all retries | 503 |
 | Claude timed out after all retries | 504 |
-| Anything unexpected | 500, generic message |
+| Anything unexpected, including an unmapped database integrity violation | 500, generic message, logged at ERROR |
 
 ## Transaction boundaries
 

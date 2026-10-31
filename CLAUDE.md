@@ -53,7 +53,10 @@ Most of your training data is Boot 3. Boot 4 differs, and you will be wrong if y
 - `@MockBean` is gone. Use `@MockitoBean` (`org.springframework.test.context.bean.override.mockito`).
 - `@WebMvcTest` and `@AutoConfigureMockMvc` are in `org.springframework.boot.webmvc.test.autoconfigure`.
 - `TestRestTemplate` moved to `org.springframework.boot.resttestclient` and isn't auto-configured. Use MockMvc for slice tests, `RestTestClient` (`org.springframework.test.web.servlet.client`, enabled with `@AutoConfigureRestTestClient`) for full-server tests.
+- `RestTestClient` status assertions have `isEqualTo(int)` but no `isConflict()`; check the jar before using a named status method.
+- `@DataJpaTest` is `org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest`. With `@Import(TestcontainersConfiguration.class)` it uses the Testcontainers Postgres (no embedded replacement) and runs Flyway + `validate`.
 - Testcontainers 2.x: `testcontainers-postgresql`, `org.testcontainers.postgresql.PostgreSQLContainer`, no type parameter. The old generic `org.testcontainers.containers.PostgreSQLContainer` still exists but is deprecated; don't use it.
+- Hibernate 7: `validate` does not check `text[]` column types (ADR-016). Every array column needs a round-trip test.
 
 Rule: confirm every Spring class, annotation, import, and property exists in the resolved dependencies before using it. If something you expected doesn't exist, say so, and log it if you got it wrong first.
 
@@ -61,19 +64,27 @@ Rule: confirm every Spring class, annotation, import, and property exists in the
 
 Package by feature. Each feature owns its entity, repository, service, controller, and DTOs.
 
-Exists today (end of M0):
+Exists today (end of M1):
 
 ```
-src/main/java/com/franchiseads/FranchiseadsApplication.java
+src/main/java/com/franchiseads/
+  brand/      Brand, BrandRepository, BrandService, BrandController, dto/ (CreateBrandRequest, BrandResponse)
+  location/   Location, LocationRepository, LocationService, LocationController, dto/
+  campaign/   Campaign, CampaignRepository, CampaignService, CampaignController, dto/
+  variant/    AdVariant, AdVariantRepository, VariantStatus (entity only, no endpoints yet)
+  common/     Strings (input normalization), error/ (GlobalExceptionHandler, ResourceNotFoundException)
 src/main/resources/application.yml         all config, env vars with local defaults
-src/main/resources/db/migration/           Flyway migrations (empty, .gitkeep)
+src/main/resources/db/migration/V1__init.sql
 src/test/java/com/franchiseads/
-  TestcontainersConfiguration.java         postgres:16 bean with @ServiceConnection; @Import it in DB tests
+  TestcontainersConfiguration.java         public; postgres:16 bean with @ServiceConnection; @Import it in DB tests
   TestFranchiseadsApplication.java         entry point for spring-boot:test-run
-  FranchiseadsApplicationTests.java        context loads
-  ActuatorHealthTests.java                 GET /actuator/health -> 200 UP (RestTestClient)
+  PersistenceMappingTests.java             @DataJpaTest: V1 + validate, text[] round trips, unique index
+  <feature>/  *ControllerTests (@WebMvcTest), *ServiceTests (Mockito), *ApiIntegrationTests (HTTP + Postgres)
+  common/error/GlobalExceptionHandlerTests (stub controller in test sources)
 docker-compose.yml, .env.example, .github/workflows/ci.yml, docs/
 ```
+
+Full-HTTP integration tests share one Spring context and one database, so data persists across test classes: use names no other test uses (e.g. append a UUID).
 
 Target layout (packages are created as milestones land):
 
