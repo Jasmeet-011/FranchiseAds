@@ -67,18 +67,24 @@ Rule: confirm every Spring class, annotation, import, and property exists in the
 
 Package by feature. Each feature owns its entity, repository, service, controller, and DTOs.
 
-Exists today (end of M2):
+Exists today (end of M3):
 
 ```
 src/main/java/com/franchiseads/
   brand/      Brand, BrandRepository, BrandService, BrandController, dto/ (CreateBrandRequest, BrandResponse)
   location/   Location, LocationRepository, LocationService, LocationController, dto/
   campaign/   Campaign, CampaignRepository, CampaignService, CampaignController, dto/
-  variant/    AdVariant, AdVariantRepository, VariantStatus (entity only, no endpoints yet)
-  claude/     ClaudeClient (retry loop), ClaudeProperties, ClaudeConfiguration, ClaudeResponse, Sleeper, Claude*Exception
-  generation/ AdBrief, Prompt, PromptBuilder, AdCopy, AdCopyParser, MalformedAdCopyException (pure, not Spring beans yet)
-  validation/ AdCopyRules (+ AdCopyRulesConfiguration); the validator comes in M3
-  common/     Strings (input normalization), error/ (GlobalExceptionHandler, ResourceNotFoundException)
+  variant/    AdVariant, AdVariantRepository, VariantStatus, VariantService (saveGenerated, list, get),
+              VariantController (GET endpoints), GeneratedVariant, dto/VariantResponse
+  claude/     ClaudeClient (retry loop, optional deadline), ClaudeProperties (incl. effort), ClaudeConfiguration,
+              ClaudeResponse, Sleeper, Claude*Exception
+  generation/ GenerationService (orchestration, not @Transactional), GenerationInputLoader (read-only tx),
+              GenerationController, GenerationProperties (deadline), GenerationConfiguration (beans for the pure
+              classes), GenerationInputs, LocationBrandMismatchException, dto/GenerateRequest,
+              AdBrief, Prompt, PromptBuilder, AdCopy, AdCopyParser, MalformedAdCopyException (pure)
+  validation/ AdCopyValidator, Violation (pure), AdCopyRules (+ AdCopyRulesConfiguration)
+  common/     Strings (input normalization), config/ClockConfiguration, error/ (GlobalExceptionHandler,
+              ResourceNotFoundException)
 src/main/resources/application.yml         all config, env vars with local defaults
 src/main/resources/db/migration/V1__init.sql
 src/test/java/com/franchiseads/
@@ -87,7 +93,10 @@ src/test/java/com/franchiseads/
   PersistenceMappingTests.java             @DataJpaTest: V1 + validate, text[] round trips, unique index
   <feature>/  *ControllerTests (@WebMvcTest), *ServiceTests (Mockito), *ApiIntegrationTests (HTTP + Postgres)
   common/error/GlobalExceptionHandlerTests (stub controller in test sources)
-  claude/     ClaudeClientTests (WireMock, RecordingSleeper), ClaudePropertiesTests, ClaudeLiveSmokeTests (@Tag("live"))
+  claude/     ClaudeClientTests (WireMock, RecordingSleeper, MutableClock), ClaudePropertiesTests, ClaudeLiveSmokeTests (@Tag("live"))
+  generation/ GenerationServiceTests (Mockito + real pure helpers), GenerationTransactionBoundaryTests (no tx during
+              Claude calls), GenerationApiIntegrationTests (HTTP + Postgres, ClaudeClient mocked)
+  validation/ AdCopyValidatorTests (plain JUnit)
 docker-compose.yml, .env.example, .github/workflows/ci.yml, docs/
 ```
 

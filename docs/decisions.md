@@ -185,6 +185,17 @@ Same brief and prompt in both runs. Output tokens fell from 624 to 133 (−79%),
 Spring 7.0.10's `JdkClientHttpRequestFactory` only has a factory-level `setReadTimeout`. So a clamped attempt uses a throwaway factory around the one shared `java.net.http.HttpClient` (same connection pool, same connect timeout) through `restClient.mutate()`. Unclamped attempts reuse the normal `RestClient`. Rejected: a custom `ClientHttpRequestFactory`, which can't reach `JdkClientHttpRequest`'s timeout, and wrapping the call in `Future.get(timeout)`, which would leave the HTTP exchange running after we give up.
 **Consequences:** The Claude phase of a generate request ends by start + 50s; loading and saving add milliseconds. Inside the budget, call 1 fits at most two full 20s attempts and a clamped third, and the regeneration gets what's left. A slow upstream gives fewer retries, not a longer request. `ClaudeClientTests` proves the clamp over HTTP: WireMock would answer 200 after 1s, inside a 5s read timeout, but with 150ms left before the deadline the attempt times out in under 900ms.
 
+## ADR-028: Banned words match whole words, case-insensitively, across any whitespace
+
+**Context:** plan.md says "case-insensitive, whole word". Java's `\b` follows its own word-character rules, which aren't Unicode-aware by default, and it misbehaves at phrase edges that aren't letters (`50% off`, `#1`). The owner's test cases: "cheap" must not match "cheapest", and "best in town" must match as a phrase.
+**Decision:** Each banned entry is stripped and split on whitespace. Each token goes through `Pattern.quote`, the tokens are joined with `\s+`, and the result is wrapped in `(?<![\p{L}\p{N}])…(?![\p{L}\p{N}])` with `CASE_INSENSITIVE | UNICODE_CASE`. A match therefore can't touch a letter or digit on either side. One violation per banned word per entry, naming the brand's spelling of the word.
+**Consequences:**
+- "cheap" doesn't match "cheapest" or "overcheap".
+- It does match "Cheap", "CHEAP", "cheap." and "cheap-looking": a hyphen is a boundary, which is the stricter choice for a banned list.
+- "best in town" matches "Best In Town" and "best  in town", but not "best inn town".
+- "café" matches "CAFÉ". Regex characters in banned words are literal.
+- Not handled: a curly apostrophe doesn't match a straight one, and non-ASCII whitespace inside a phrase isn't treated as a space. Covered by `AdCopyValidatorTests`.
+
 ## ADR-029: Transaction boundaries through separate beans, proven by a test
 
 **Context:** ADR-012 requires a read-only transaction to load, none during the Claude calls, and a new one to save. Spring's transactions are proxy-based: a `@Transactional` method called on `this` from `generate` would run without a transaction and nothing would say so.
@@ -196,4 +207,3 @@ Spring 7.0.10's `JdkClientHttpRequestFactory` only has a factory-level `setReadT
 **Context:** flow.md originally said "malformed again → 502, nothing saved" and left open what happens when the regeneration call itself fails (a timeout, the deadline, a 503). In both cases a parseable first attempt may already exist. Throwing it away costs a model call the client has to repeat, and hides output a human could review.
 **Decision (owner-approved):** If any call produced parseable copy, the request saves a variant from the last call that did, flagged with that call's violations if it has any. 502/503/504 only when no call produced parseable copy. This covers every way the regeneration can fail: malformed output, `ClaudeTimeoutException` (including the deadline), `ClaudeUnavailableException` and `ClaudeRequestException`. `generationAttempts` counts the model calls that returned a response, so invalid → malformed is 2 and invalid → timeout is 1.
 **Consequences:** A request never returns an error while holding usable output. The client can tell a "regeneration didn't complete" variant by `validationPassed=false` together with `generationAttempts=1`. Because `GenerationService` handles the regeneration failure instead of letting `GlobalExceptionHandler` see it, it logs the failure itself (ERROR for a rejected request, WARN otherwise), so nothing is swallowed. The full outcome table is in flow.md, step 7.
-
