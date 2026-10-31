@@ -85,17 +85,21 @@ Maximum model calls per request: 2 (not counting transport retries).
 
 ## Validation rules
 
-| Rule | Applies to | Detail |
-|---|---|---|
-| `WRONG_COUNT` | both | exactly 5 headlines, 2 descriptions (configurable within Google's limits) |
-| `HEADLINE_TOO_LONG` | headlines | more than 30 Unicode code points |
-| `DESCRIPTION_TOO_LONG` | descriptions | more than 90 Unicode code points |
-| `BLANK` | both | empty after trim |
-| `EXCLAMATION_IN_HEADLINE` | headlines | contains `!` |
-| `BANNED_WORD` | both | brand banned word or phrase, case-insensitive, whole word |
-| `DUPLICATE` | both | same text twice within the list, case-insensitive, trimmed |
+| Rule | Applies to | Detail | Message |
+|---|---|---|---|
+| `WRONG_COUNT` | both | exactly 5 headlines, 2 descriptions (configurable within Google's limits) | `WRONG_COUNT: headlines has 4 entries (expected 5)` |
+| `BLANK` | both | empty after trim | `BLANK: descriptions[1] is blank` |
+| `HEADLINE_TOO_LONG` | headlines | more than 30 Unicode code points | `HEADLINE_TOO_LONG: headlines[2] is 34 characters (max 30): "..."` |
+| `DESCRIPTION_TOO_LONG` | descriptions | more than 90 Unicode code points | `DESCRIPTION_TOO_LONG: descriptions[0] is 95 characters (max 90): "..."` |
+| `EXCLAMATION_IN_HEADLINE` | headlines | contains `!` | `EXCLAMATION_IN_HEADLINE: headlines[0] contains "!": "..."` |
+| `BANNED_WORD` | both | brand banned word or phrase, case-insensitive, whole word | `BANNED_WORD: headlines[3] contains banned word "best in town": "..."` |
+| `DUPLICATE` | both | same text twice within the list, case-insensitive, trimmed | `DUPLICATE: headlines[4] repeats headlines[1]: "..."` |
 
-Character counts use code points, not `String.length()`, so an emoji counts as one character.
+- Character counts use code points, not `String.length()`, so an emoji counts as one character. Counts and limits come from `AdCopyRules` (ADR-024), the same values the prompt states.
+- **Whole word** (ADR-028): a banned word or phrase matches only where it doesn't touch a letter or digit on either side. "cheap" doesn't match "cheapest" or "overcheap", but does match "Cheap", "cheap-looking" and "cheap." Whitespace inside a phrase matches any run of whitespace, so "best in town" matches "Best In Town" and "best  in town" but not "best inn town". Letter case is compared with Unicode rules ("café" matches "CAFÉ"), and other characters match literally ("50% off"). Each banned word is reported once per entry.
+- **Duplicates** compare entries after trimming and lowercasing; each repeat is reported against the first occurrence. Headlines and descriptions are checked separately.
+- A blank entry gets only `BLANK`. Every other entry is checked against every rule, even when the count is wrong, so the regeneration prompt carries complete feedback.
+- **Order:** headlines, then descriptions. Within each list the count comes first, then the entries by index, then the rules in the order of this table.
 
 ## Approval flow
 
