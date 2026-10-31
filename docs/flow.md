@@ -15,8 +15,9 @@ sequenceDiagram
     participant V as AdCopyValidator
 
     C->>G: generate(campaignId, locationId)
+    Note over G: deadline = now + 50s
     G->>DB: load campaign, location, brand (read-only tx)
-    G->>CL: attempt 1
+    G->>CL: call 1 (no tx)
     CL-->>G: model text
     G->>G: parse JSON
     G->>V: validate
@@ -24,35 +25,41 @@ sequenceDiagram
         G->>DB: save DRAFT, validationPassed=true (new tx)
         G-->>C: 201 variant
     else invalid or malformed
-        G->>CL: attempt 2 with feedback
-        CL-->>G: model text
-        G->>G: parse JSON
-        G->>V: validate
-        alt valid
-            G->>DB: save DRAFT, validationPassed=true
+        G->>CL: call 2 with feedback (no tx)
+        alt call 2 returns parseable copy
+            G->>V: validate
+            G->>DB: save call 2's copy, flagged if it has violations
             G-->>C: 201 variant
-        else invalid
-            G->>DB: save DRAFT, validationPassed=false, violations
+        else call 2 malformed or failed, call 1 was parseable
+            G->>DB: save call 1's copy, flagged with its violations
             G-->>C: 201 variant (flagged)
-        else malformed again
-            G-->>C: 502, nothing saved
+        else no call produced parseable copy
+            G-->>C: 502 / 503 / 504, nothing saved
         end
     end
 ```
 
 ### Steps
 
-1. **Load** campaign, location, and brand in a read-only transaction. Missing campaign or location → 404. Location belongs to a different brand than the campaign → 422.
+1. **Load** campaign, location, and brand in a read-only transaction (`GenerationInputLoader`). Missing campaign or location → 404. Location belongs to a different brand than the campaign → 422. The request's deadline (default 50s, see Latency budget) starts before this step.
 2. **Prompt.** System prompt: brand voice guidelines, banned words, exact output counts, character limits, the no-exclamation rule for headlines, and "respond with JSON only". User prompt: location name, city, region, local offer, campaign theme.
-3. **Call Claude** outside any transaction. Retries per the policy below happen inside `ClaudeClient` and don't count as regeneration attempts.
+3. **Call Claude** outside any transaction, with the request's deadline. Retries per the policy below happen inside `ClaudeClient` and don't count as regeneration attempts.
 4. **Parse** into `AdCopy(headlines, descriptions)`. Strip one markdown fence around the JSON, trim entries, ignore extra keys. Anything else is malformed: surrounding prose, missing or null keys, non-arrays, non-string items, and any stop reason other than `end_turn` (`max_tokens` means the JSON was probably cut off). Counts and blank entries are left to the validator.
 5. **Validate** with `AdCopyValidator`.
-6. **Regenerate at most once** if step 4 or 5 failed. The second prompt includes the previous output and either the violation list or "your previous response was not valid JSON".
-7. **Save** in its own transaction:
-   - valid: `DRAFT`, `validationPassed=true`, `violations=[]`
-   - still invalid: `DRAFT`, `validationPassed=false`, all violations from the final attempt (flagged; can never be submitted)
-   - malformed twice: nothing saved, 502
-8. `generationAttempts` records 1 or 2. `model` records the model ID used.
+6. **Regenerate at most once** if step 4 or 5 failed. The second prompt includes the previous output and either every violation message, one per line, or the single line `Your previous response was not valid JSON: <parser detail>`.
+7. **Save** in its own transaction (`VariantService.saveGenerated`). The rule (ADR-030): **if any call produced parseable copy, save the copy from the last call that did**, as `DRAFT`, with `validationPassed=true` and `violations=[]` if it has no violations, otherwise `validationPassed=false` and all of that call's violations (flagged; can never be submitted). Only when no call produced parseable copy does the request fail, and nothing is saved:
+
+   | Call 1 | Call 2 | Saved | `generationAttempts` | Response |
+   |---|---|---|---|---|
+   | valid | not made | call 1 | 1 | 201 |
+   | invalid or malformed | valid or invalid | call 2 | 2 | 201 |
+   | invalid | malformed | call 1, flagged | 2 | 201 |
+   | invalid | failed (timeout, deadline, 429/5xx, rejected) | call 1, flagged | 1 | 201 |
+   | malformed | malformed | nothing | – | 502 |
+   | malformed | failed | nothing | – | 504 / 503 / 502, per the failure |
+   | failed | not made | nothing | – | 504 / 503 / 502, per the failure |
+
+8. `generationAttempts` counts the model calls that returned a response (1 or 2). `model` records the model ID from the response of the call whose copy was saved (the configured model if the response didn't name one).
 
 Maximum model calls per request: 2 (not counting transport retries).
 
@@ -163,6 +170,15 @@ All errors are `ProblemDetail` (RFC 9457). Internal details and stack traces are
 | Claude timed out after all retries | 504 |
 | Anything unexpected, including an unmapped database integrity violation | 500, generic message, logged at ERROR |
 
+## Latency budget
+
+A generate request gets a deadline of 50s from its start (`franchiseads.generation.deadline`), shared by both model calls and all their retries (ADR-027). `ClaudeClient` clamps each attempt's read timeout to the time left and stops with `ClaudeTimeoutException` instead of starting an attempt or a retry delay that can't finish in time.
+
+- **Before (M2 settings):** an attempt could take the full 30s read timeout (connect included), and a retry delay up to the 10s `retry-after` cap. One call: 3 × 30 + 2 × 10 = 110s. The regeneration only starts after call 1 returns, so in the worst case call 1 succeeds on its third slow attempt with unusable output and call 2 fails the same way: 220s.
+- **Now:** read timeout 20s, deadline 50s. Every Claude call ends by request start + 50s, whatever upstream does; loading and saving add milliseconds. Inside the budget, call 1 fits at most two full 20s attempts and a clamped third, and the regeneration gets whatever is left. If the deadline cuts the regeneration short after a parseable call 1, call 1's copy is saved flagged (step 7).
+
+The 50s bound keeps responses inside the 60s idle timeout of a default AWS load balancer (M6).
+
 ## Transaction boundaries
 
-The Claude call can take seconds. Holding a database transaction (and a pooled connection) across it would exhaust the pool under load. So generation runs in three phases: a read-only transaction to load inputs, the Claude calls with no transaction, then a short transaction to save. `GenerationService.generate` itself is not `@Transactional`.
+The Claude call can take seconds. Holding a database transaction (and a pooled connection) across it would exhaust the pool under load. So generation runs in three phases: a read-only transaction to load inputs, the Claude calls with no transaction, then a short transaction to save. `GenerationService.generate` itself is not `@Transactional`. The two transactional steps live in other beans (`GenerationInputLoader.load`, `VariantService.saveGenerated`) and are called through their Spring proxies; a `@Transactional` method called on `this` would silently run without a transaction (ADR-029). `GenerationTransactionBoundaryTests` checks that no transaction is active inside each Claude call.
