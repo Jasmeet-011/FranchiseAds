@@ -20,12 +20,14 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 /**
- * One generated set of headlines and descriptions for a campaign at a location. Mapped in M1 so the
- * schema is validated; generation (M3) and approval (M4) behavior come later.
+ * One generated set of headlines and descriptions for a campaign at a location. The copy never changes after
+ * generation; only the review status (and the rejection reason) does, through {@link #submit}, {@link #approve} and
+ * {@link #reject}.
  */
 @Entity
 @Table(name = "ad_variant")
@@ -94,6 +96,25 @@ public class AdVariant {
 		this.violations = new ArrayList<>(violations);
 		this.generationAttempts = generationAttempts;
 		this.model = model;
+	}
+
+	/**
+	 * {@code DRAFT} to {@code PENDING_REVIEW}. The rules for this and the other actions, including the validation
+	 * guard, are in {@link VariantStatus#next}.
+	 */
+	public void submit() {
+		status = status.next(VariantAction.SUBMIT, validationPassed);
+	}
+
+	public void approve() {
+		status = status.next(VariantAction.APPROVE, validationPassed);
+	}
+
+	/** Changes nothing if the transition isn't allowed. */
+	public void reject(String reason) {
+		VariantStatus next = status.next(VariantAction.REJECT, validationPassed);
+		rejectionReason = Objects.requireNonNull(reason, "reason");
+		status = next;
 	}
 
 	@PrePersist
