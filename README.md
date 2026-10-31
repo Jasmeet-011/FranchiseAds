@@ -49,12 +49,12 @@ To use other credentials, `cp .env.example .env` and edit it. Both Docker Compos
 
 ## Roadmap
 
-- [x] M0: Skeleton, CI, docs
+- [x] M0: Skeleton, CI, docs scaffolding
 - [ ] M1: Domain model and CRUD
-- [ ] M2: Claude API client with retries and timeouts
+- [ ] M2: Claude API client
 - [ ] M3: Validator and generation endpoint
 - [ ] M4: Approval workflow and end-to-end test
-- [ ] M5: Docker image, OpenAPI docs
+- [ ] M5: Packaging, API docs, README
 - [ ] M6: AWS deployment
 
 ## Docs
