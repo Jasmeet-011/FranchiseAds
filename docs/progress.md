@@ -2,7 +2,7 @@
 
 ## Current Status
 
-M3 complete: `AdCopyValidator`, `GenerationService` (generate, validate, regenerate once, save the last parseable attempt), a 50s per-request deadline for Claude calls, `POST /campaigns/{campaignId}/generate`, `GET /campaigns/{campaignId}/variants?status=`, `GET /variants/{id}`, and the Claude error mapping (502/503/504, 422). Requests now send `output_config.effort: low`. `./mvnw verify` passes: 27 suites, 271 tests. The live smoke test was run by the owner before and after the effort change (ADR-026). Nobody has called the generate endpoint against the real API yet; the owner will. Next: M4 (approval workflow and end-to-end test), when the owner says so.
+M4 complete: test isolation by truncation, the `VariantStatus` transition table, `POST /variants/{id}/submit`, `/approve` and `/reject`, 409s with `currentStatus` and `attemptedAction`, `@Version` optimistic locking mapped to 409, and an end-to-end test running the real `ClaudeClient` against WireMock on Postgres. `./mvnw verify` passes: 32 suites, 336 tests. No real API calls were made in M4; the owner will run the approval flow against the real API with the curl commands from the M4 report. Next: M5 (packaging, API docs, README), when the owner says so.
 
 ## Milestones
 
@@ -10,7 +10,7 @@ M3 complete: `AdCopyValidator`, `GenerationService` (generate, validate, regener
 - [x] M1: Domain model and CRUD
 - [x] M2: Claude API client
 - [x] M3: Validator and generation endpoint
-- [ ] M4: Approval workflow and end-to-end test
+- [x] M4: Approval workflow and end-to-end test
 - [ ] M5: Packaging, API docs, README
 - [ ] M6: AWS deployment
 
@@ -135,6 +135,42 @@ M3 complete: `AdCopyValidator`, `GenerationService` (generate, validate, regener
 - ADRs 026 to 030 added; ADR-025 marked partially superseded. flow.md changed with each behavior commit: validation semantics and messages, the deadline row and paragraph, steps 1–8 with the outcome table, the diagram, the latency budget, transaction beans, error table rows, reading variants. CLAUDE.md structure updated to the end of M3 (approved).
 - Not done (out of M3 scope): approval actions, editing variants, and the end-to-end test with WireMock standing in for Claude (M4).
 
+### 2026-10-31: M4
+
+- Start checks:
+  - progress.md marked M3 complete, the `m3` tag exists, and the tree was clean.
+  - `./mvnw verify` was green: 27 suites, 271 tests. A 28th report, `ClaudeLiveSmokeTests` (18:05), was left over from the owner's live run.
+- Docs read before planning: CLAUDE.md, progress.md, plan.md M4, flow.md (approval flow, error mapping), decisions.md (ADR-018, 029, 030 and the rest).
+- Read-only check before planning: spring-test 7.0.10's `MockitoSpyBeanOverrideHandler` handles JDK proxies (`Proxy.isProxyClass`, `delegatesTo`), so `@MockitoSpyBean` works on a Spring Data repository.
+- Owner decisions:
+  - plan approved with all five assumed decisions: ADRs in their behavior commits, repeated actions are 409, the flag guard in `VariantStatus.next`, the spy-based concurrency hook, and the CLAUDE.md edits
+  - the test-isolation ADR goes in commit 1 (ADR-031), and later ADRs are renumbered
+- Commits, each with `verify` green:
+  1. Test isolation (273 tests). `TruncateTablesExtensionTests` failed as it should with the `@ExtendWith` removed (`expected: 0L`).
+  2. State machine (307)
+  3. Submit, approve and reject endpoints, plus the flow.md approval and error sections (330)
+  4. Optimistic locking, plus flow.md (333)
+  5. End-to-end test (336)
+  6. These docs
+- Lock test checked against a regression:
+  - With `@Version` removed and the field initialized to `0L` (so the not-null column is still filled), the stale reject returned 200 instead of 409 and landed.
+  - The control test then failed only on its version assertion.
+  - `@Version` was restored and `verify` rerun before the commit.
+  - The first attempt at this check was invalid; see the mistakes log.
+- End-to-end: the log shows the real `ClaudeClient` calling WireMock (`Claude attempt 1/3: HTTP 200 in 4 ms`). Every test saved "variant 1 for campaign 1", so truncation and the identity restart work in that context too.
+- Finding: CLAUDE.md said full-HTTP tests "share one Spring context and one database". Only classes with the same context configuration do. One with `@MockitoBean ClaudeClient`, say, starts its own context and its own Postgres container, so rows leaked within a context, not across all of them. CLAUDE.md now describes the truncation rule instead (approved).
+- Deviations from the approved plan:
+  - Added `TruncateTablesExtensionTests` (2 tests), because a green suite alone wouldn't show the extension does anything.
+  - In the lock test, the approving transaction's own `findById` also goes through the stub (an `EntityManager.find` in that transaction), not straight to the real repository as the plan said. Same effect; the `AtomicBoolean` makes the interference happen once.
+  - Moved the "version is 1 after setup" assertion out of `@BeforeEach`, so the regression check could reach the stale write (see the mistakes log). The comment records the expected version.
+  - No ADR-034: the end-to-end wiring needed nothing unusual, so it's a dated note under ADR-019, as the plan allowed.
+- Small decisions inside the plan:
+  - The concurrency 409 is logged at INFO with the entity name and ID.
+  - The 409 detail parts that name statuses are derived from the transition table.
+  - The end-to-end test builds the Messages envelope with `JsonMapper` instead of reusing the package-private `ClaudeFixtures`.
+- ADRs 031 to 033 added, plus the ADR-019 note. flow.md changed with commits 3 (response example, approval endpoints, 409 body and details, error table) and 4 (concurrency rule and detail). CLAUDE.md: structure to the end of M4, plus the truncation rule.
+- Not done (out of M4 scope): reopening rejected variants, editing variants (which would bring ETag/If-Match back, see ADR-033), roles and permissions.
+
 ## Agent Mistakes Log
 
 | Date | What the agent got wrong | How it was caught | Fix |
@@ -157,3 +193,6 @@ M3 complete: `AdCopyValidator`, `GenerationService` (generate, validate, regener
 | 2026-10-31 | Edited three Java files with a Python script that opened them in text mode without `newline=''`. On Windows that rewrote the LF files with CRLF line endings | `file` on the edited files before running anything | Converted them back to LF with `sed`. Every later script reads and writes with `newline=''`, and the working files stay LF |
 | 2026-10-31 | Put a long Python edit script inline in a bash heredoc; bash failed to parse it (`unexpected EOF`) | The command's own error; no file had been changed | Moved edit scripts into files in the session scratchpad and ran them from there |
 | 2026-10-31 | Read the exit code of a background PowerShell `verify` job as Maven's result. It was the exit code of the job's last statement, a string, so it's always 0. Committed `02cc666` (docs only) in the same command that printed the log tail, before confirming the build | Own re-check right after the commit: the log tail showed no Maven summary | Confirmed from the log (no `[ERROR]`) and the surefire reports (168 tests, 0 failures) that this `verify` had passed. Every later run captures `$LASTEXITCODE` straight after `mvnw` and checks the reports before committing |
+| 2026-10-31 | Put a Python edit script for `VariantControllerTests` inline in a bash heredoc again; bash failed to parse it (`unexpected EOF while looking for matching '`). This is the same mistake as the earlier heredoc row, which already recorded the fix | The command's own error; no file had been changed (checked with `git status`) | Wrote the script with the Write tool into the scratchpad and ran it from there, as the earlier fix says. Every later edit script in M4 went through a file |
+| 2026-10-31 | Put a reference to ADR-033 in `AdVariant`'s Javadoc in the state-machine commit, when ADR-033 only lands in the optimistic-locking commit. That would have repeated the M3 dangling-reference problem the plan was built to avoid | Own re-check of the diff before running `verify` | Removed the sentence before the commit and added it back in the locking commit, together with ADR-033 |
+| 2026-10-31 | Ran the `@Version` regression check by just deleting the annotation. The `version` field then stayed null, the insert in the test setup hit the not-null column, and both tests errored before reaching the stale write. That proved nothing about the lock | Both tests failed with errors (not failures), the control test included. The cause was `null value in column "version" ... violates not-null constraint` | Reran with the annotation removed and the field initialized to `0L`, after moving the version precondition out of `@BeforeEach`. The stale reject then returned 200 instead of 409, which is the counterfactual the test is meant to catch |

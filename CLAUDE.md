@@ -67,15 +67,17 @@ Rule: confirm every Spring class, annotation, import, and property exists in the
 
 Package by feature. Each feature owns its entity, repository, service, controller, and DTOs.
 
-Exists today (end of M3):
+Exists today (end of M4):
 
 ```
 src/main/java/com/franchiseads/
   brand/      Brand, BrandRepository, BrandService, BrandController, dto/ (CreateBrandRequest, BrandResponse)
   location/   Location, LocationRepository, LocationService, LocationController, dto/
   campaign/   Campaign, CampaignRepository, CampaignService, CampaignController, dto/
-  variant/    AdVariant, AdVariantRepository, VariantStatus, VariantService (saveGenerated, list, get),
-              VariantController (GET endpoints), GeneratedVariant, dto/VariantResponse
+  variant/    AdVariant (@Version; submit/approve/reject), AdVariantRepository, VariantStatus (next(): the only
+              transition rules), VariantAction, IllegalTransitionException, VariantService (saveGenerated, list, get,
+              submit, approve, reject), VariantController (GET + action endpoints), GeneratedVariant,
+              dto/ (VariantResponse, RejectRequest)
   claude/     ClaudeClient (retry loop, optional deadline), ClaudeProperties (incl. effort), ClaudeConfiguration,
               ClaudeResponse, Sleeper, Claude*Exception
   generation/ GenerationService (orchestration, not @Transactional), GenerationInputLoader (read-only tx),
@@ -90,6 +92,8 @@ src/main/resources/db/migration/V1__init.sql
 src/test/java/com/franchiseads/
   TestcontainersConfiguration.java         public; postgres:16 bean with @ServiceConnection; @Import it in DB tests
   TestFranchiseadsApplication.java         entry point for spring-boot:test-run
+  TruncateTablesExtension.java             @ExtendWith it on every test that writes through a full context (+ Tests)
+  ApprovalWorkflowEndToEndTests.java       real ClaudeClient against WireMock + Postgres, all over HTTP
   PersistenceMappingTests.java             @DataJpaTest: V1 + validate, text[] round trips, unique index
   <feature>/  *ControllerTests (@WebMvcTest), *ServiceTests (Mockito), *ApiIntegrationTests (HTTP + Postgres)
   common/error/GlobalExceptionHandlerTests (stub controller in test sources)
@@ -97,10 +101,12 @@ src/test/java/com/franchiseads/
   generation/ GenerationServiceTests (Mockito + real pure helpers), GenerationTransactionBoundaryTests (no tx during
               Claude calls), GenerationApiIntegrationTests (HTTP + Postgres, ClaudeClient mocked)
   validation/ AdCopyValidatorTests (plain JUnit)
+  variant/    VariantStatusTests, AdVariantTests (plain JUnit), VariantOptimisticLockingTests (@Version over HTTP,
+              deterministic via @MockitoSpyBean on the repository)
 docker-compose.yml, .env.example, .github/workflows/ci.yml, docs/
 ```
 
-Full-HTTP integration tests share one Spring context and one database, so data persists across test classes: use names no other test uses (e.g. append a UUID).
+Tests that write through a full Spring context declare `@ExtendWith(TruncateTablesExtension.class)`: every application table (not `flyway_schema_history`) is truncated with `RESTART IDENTITY CASCADE` before each test (ADR-031), so no test sees another's rows and IDs start at 1. `@DataJpaTest` classes roll back instead and don't need it.
 
 Target layout (packages are created as milestones land):
 

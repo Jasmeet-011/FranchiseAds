@@ -110,21 +110,22 @@ Spring Boot 4.1 project from Initializr, docker-compose Postgres, Testcontainers
 
 ---
 
-## M4: Approval workflow and end-to-end test
+## M4: Approval workflow and end-to-end test (done)
 
 **Goal:** variants move through review safely, and the whole system is proven against real Postgres.
 
 **Scope**
-- `VariantStatus` owns the allowed transitions in one place.
-- `POST /variants/{id}/submit`, `POST /variants/{id}/approve`, `POST /variants/{id}/reject` with a required `reason`.
-- Guards: only `validationPassed` variants can be submitted. Illegal transitions return 409 with the current status and the attempted action.
-- `@Version` optimistic locking: concurrent approve and reject on the same variant, one wins, the other gets 409.
-- One Testcontainers end-to-end test with WireMock standing in for Claude: create brand, location, campaign, generate, submit, approve. Plus: a flagged variant cannot be submitted.
+- Test isolation first (added during M4, ADR-031): `TruncateTablesExtension` truncates every application table except `flyway_schema_history`, with `RESTART IDENTITY CASCADE`, before each test that writes through a full context.
+- `VariantStatus.next(action, validationPassed)` owns every transition rule, the flagged-submit guard included (ADR-032). `VariantAction` is `SUBMIT`, `APPROVE`, `REJECT`. Repeating an action is 409, not idempotent.
+- `POST /variants/{id}/submit`, `POST /variants/{id}/approve`, `POST /variants/{id}/reject` with a required `reason` (stripped, not blank, at most 500). Each returns 200 with the updated variant; `VariantResponse` gained `rejectionReason` and `updatedAt`.
+- Guards: only `validationPassed` variants can be submitted. Illegal transitions return 409 with `currentStatus` and `attemptedAction` extension properties and a readable detail.
+- `@Version` optimistic locking (ADR-033): a stale update maps `ObjectOptimisticLockingFailureException` to 409 "The variant was modified concurrently. Reload it and retry." ETag/If-Match considered and rejected.
+- One Testcontainers end-to-end test with WireMock standing in for Claude and the real `ClaudeClient` pointed at it: create brand, location, campaign, generate, submit, approve. Plus: a flagged variant (2 calls, both violating) cannot be submitted, and a rejected variant cannot be approved.
 
 **Tests**
-- Unit tests covering every transition pair, allowed and rejected.
-- Controller tests for each action.
-- Concurrency test for the optimistic lock.
+- Unit tests covering every status × action × validation-flag combination (24), allowed and rejected, plus a loop that fails if anything else becomes allowed.
+- Controller tests for each action, the reason rules, 404 and both kinds of 409.
+- Concurrency test for the optimistic lock, deterministic: the reject request loads the variant, a separate transaction approves it and commits, the stale reject gets 409 and doesn't land. Shown to fail with the `@Version` check turned off.
 
 **Acceptance criteria**
 - Every illegal transition returns 409, never 500.
