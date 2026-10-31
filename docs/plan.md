@@ -71,7 +71,7 @@ Spring Boot 4.1 project from Initializr, docker-compose Postgres, Testcontainers
 
 ---
 
-## M3: Validator and generation endpoint
+## M3: Validator and generation endpoint (done)
 
 **Goal:** the core feature. Generate, validate, regenerate once, save.
 
@@ -85,6 +85,9 @@ Spring Boot 4.1 project from Initializr, docker-compose Postgres, Testcontainers
   - no duplicates within headlines or within descriptions (case-insensitive, trimmed)
   - each violation names the rule, the field, the index, and the actual value
 - `GenerationService` implementing the flow in `flow.md`, including the transaction boundaries.
+- Per-request deadline (added during M3, ADR-027): read timeout 20s and a 50s deadline per generate request, shared by both model calls and their retries. Each attempt's read timeout is clamped to the time left; no attempt or retry delay starts that can't finish in time (504). Measured with an injectable `Clock`.
+- Last parseable attempt (added during M3, ADR-030): if any call produced parseable copy, save the copy from the last call that did, flagged with its violations if it has any. 502/503/504 only when no call produced parseable copy. `generationAttempts` counts the model calls that returned a response.
+- Requests send `output_config.effort` (default `low`, ADR-026).
 - Endpoints:
   - `POST /campaigns/{campaignId}/generate` with `{ "locationId": ... }` → 201 with the variant
   - `GET /campaigns/{campaignId}/variants?status=...`
@@ -92,13 +95,16 @@ Spring Boot 4.1 project from Initializr, docker-compose Postgres, Testcontainers
 
 **Tests**
 - Validator: one test per rule, boundaries (30 vs 31, 90 vs 91), emoji counted as one character, banned word as a substring of a longer word must NOT match.
-- `GenerationService` with Mockito: valid first try (1 call), invalid then valid (2 calls, second prompt contains the violations), invalid twice (saved flagged), malformed then valid, malformed twice (502, nothing saved), Claude unavailable (503, nothing saved), location from another brand (422).
+- `GenerationService` with Mockito: valid first try (1 call), invalid then valid (2 calls, second prompt contains the violations), invalid twice (saved flagged), malformed then valid, malformed twice (502, nothing saved), Claude unavailable on the first call (503, nothing saved), location from another brand (422). Added: invalid then malformed, and invalid then a failed regeneration call (first attempt saved flagged); malformed then a failed call (that error, nothing saved).
+- Deadline: each attempt's read timeout clamped to the time left, proven over HTTP with WireMock; no attempt after the deadline; no retry delay that passes it.
+- Transaction boundaries: no transaction active while the Claude client is called (Spring context + Postgres).
 - Controller tests for the three endpoints.
 
 **Acceptance criteria**
 - Generation never makes more than 2 model calls per request.
 - A flagged variant is saved with every violation listed and `validationPassed: false`.
 - Nothing is saved when no parseable copy was produced.
+- The Claude phase of a generate request ends within 50s of its start.
 
 **Out of scope:** approval actions, editing variants by hand.
 
