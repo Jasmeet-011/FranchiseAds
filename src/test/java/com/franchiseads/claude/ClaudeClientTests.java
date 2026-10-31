@@ -20,6 +20,8 @@ import static com.github.tomakehurst.wiremock.stubbing.Scenario.STARTED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.franchiseads.generation.AdCopyParser;
+import com.franchiseads.generation.MalformedAdCopyException;
 import com.github.tomakehurst.wiremock.client.ResponseDefinitionBuilder;
 import com.github.tomakehurst.wiremock.junit5.WireMockExtension;
 import java.io.IOException;
@@ -113,6 +115,17 @@ class ClaudeClientTests {
 		assertThat(response.text()).isEqualTo("Sure! Here are some ads: not json");
 		verifyRequests(1);
 		assertThat(sleeper.sleeps()).isEmpty();
+	}
+
+	@Test
+	void garbageModelTextInAValidEnvelopeIsOneRequestAndMalformedForTheParser() {
+		wireMock.stubFor(post("/v1/messages").willReturn(okJson(message("Here are your ads: headline one, two"))));
+
+		ClaudeResponse response = client().complete("system", "user");
+
+		verifyRequests(1);
+		assertThat(sleeper.sleeps()).isEmpty();
+		assertThatThrownBy(() -> new AdCopyParser().parse(response)).isInstanceOf(MalformedAdCopyException.class);
 	}
 
 	// --- non-retryable 4xx ---
