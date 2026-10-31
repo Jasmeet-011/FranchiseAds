@@ -168,4 +168,6 @@ Short ADRs. Each has context, the decision, and its consequences. Newest at the 
 | Live run | Effort sent | Latency | Input tokens | Output tokens | Thinking tokens | Thinking blocks |
 |---|---|---|---|---|---|---|
 | M2 (before) | none (model default `medium`) | 3632 ms | 652 | 624 | not logged | 1 |
-| After | `low` | pending: owner runs `-Plive` | | | | |
+| After | `low` | 1817 ms | 652 | 133 | 0 | 0 |
+
+Same brief and prompt in both runs. Output tokens fell from 624 to 133 (−79%), and none of the 133 went to thinking. The answer was valid in both (after: every headline ≤ 24 characters, descriptions under 80, no `!`). Each row is a single run, so the latency figures are approximate; the token counts are the reliable comparison.
