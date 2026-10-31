@@ -45,7 +45,7 @@ Prerequisites: JDK 21 (with `JAVA_HOME` pointing at it) and Docker.
 
 All configuration comes from environment variables (see [.env.example](.env.example)). With nothing set, the app and docker-compose both default to user `franchiseads` / password `franchiseads` on `jdbc:postgresql://localhost:5432/franchiseads`, so the steps above work with no setup.
 
-To use other credentials, `cp .env.example .env` and edit it. Docker Compose reads `.env` automatically, but Spring Boot does not. Export the same `DB_URL`, `DB_USERNAME` and `DB_PASSWORD` in your shell before `./mvnw spring-boot:run`. Postgres only applies the credentials when the volume is first created, so run `docker compose down -v` after changing them.
+To use other credentials, `cp .env.example .env` and edit it. Both Docker Compose and the app read `.env` from the directory you run them in (the repo root). Real environment variables override `.env`. The app parses it as a `.properties` file, so write plain `KEY=value` lines without quotes. Postgres only applies the credentials when the volume is first created, so run `docker compose down -v` after changing them.
 
 ## Roadmap
 

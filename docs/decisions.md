@@ -81,3 +81,7 @@ Short ADRs. Each has context, the decision, and its consequences. Newest at the 
 **Context:** `String.length()` counts UTF-16 units, so an emoji counts as 2.
 **Decision:** Length limits use `codePointCount`.
 **Consequences:** Closer to how Google Ads counts. Google counts some wide characters (for example CJK) as 2, which this deliberately doesn't model.
+
+## ADR-014: Load `.env` for local runs
+
+**Decision:** `spring.config.import: optional:file:.env[.properties]`, so local runs read `./.env`; it's optional, so CI and AWS run without one, and real environment variables still override it.

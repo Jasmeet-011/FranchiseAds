@@ -106,6 +106,7 @@ com.franchiseads
 ## Testing rules
 
 - `verify` must pass before every commit. CI runs it on Linux with no API key and no `.env`.
+- A local `.env` is also loaded during tests (`spring.config.import` in `application.yml`). Tests must not depend on it: set every property a test relies on in the test itself.
 - Tests never call the real Claude API. WireMock only.
 - Pure logic (validator, state transitions, prompt builder, parser) gets plain JUnit tests with no Spring context.
 - Services: Mockito. Controllers: `@WebMvcTest` + MockMvc. Persistence: Testcontainers Postgres.

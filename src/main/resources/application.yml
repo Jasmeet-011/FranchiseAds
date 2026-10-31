@@ -2,6 +2,10 @@ spring:
   application:
     name: franchiseads
 
+  # Local runs read ./.env if it exists; real environment variables still take precedence.
+  config:
+    import: optional:file:.env[.properties]
+
   # Defaults match docker-compose.yml for local dev; override via env vars everywhere else.
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/franchiseads}

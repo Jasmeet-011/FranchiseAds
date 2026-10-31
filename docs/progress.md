@@ -32,6 +32,12 @@ M0 complete: skeleton, CI and docs scaffolding are in place. `./mvnw verify` pas
 - Checked every class, annotation, package, and artifact named in the drafts against the resolved jars (Boot 4.1.2, Spring Framework 7.0.10, Testcontainers 2.0.5, Jackson 3.1.7, JUnit 6.0.3). All exist. Added exact packages for the moved test classes and clarified that Jackson annotations stay in `com.fasterxml.jackson.annotation`.
 - Restored facts from the M0 ADRs that the draft decisions dropped. Fixed two draft errors (see log below).
 - Checked: Boot 3.5 OSS end date 2026-06-30 (endoflife.date).
+- Config: `spring.config.import: optional:file:.env[.properties]` (ADR-014). Verified against docker-compose Postgres by checking `pg_stat_activity`:
+  - With a `.env` naming a test role, the app connected as that role.
+  - With the same `.env` plus real `DB_*` env vars, it connected as the env-var role, so env vars win.
+  - With no `.env`, it started on the defaults.
+  - `./mvnw test` passed even with a `.env` pointing at a nonexistent host, because `@ServiceConnection` overrides the datasource.
+  - `.env` is still git-ignored (`.gitignore:8`).
 
 ## Agent Mistakes Log
 
