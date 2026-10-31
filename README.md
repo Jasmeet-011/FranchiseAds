@@ -47,6 +47,19 @@ All configuration comes from environment variables (see [.env.example](.env.exam
 
 To use other credentials, `cp .env.example .env` and edit it. Both Docker Compose and the app read `.env` from the directory you run them in (the repo root). Real environment variables override `.env`. The app parses it as a `.properties` file, so write plain `KEY=value` lines without quotes. Postgres only applies the credentials when the volume is first created, so run `docker compose down -v` after changing them.
 
+### Live smoke test (optional, costs one API call)
+
+All automated tests stub the Claude API with WireMock, so `./mvnw verify` and CI need no API key. One extra test, tagged `live`, calls the real API once and checks that the reply parses into ad copy. It's excluded from `verify` and CI. To run it:
+
+1. Put your key in `.env` (`ANTHROPIC_API_KEY=...`, see [.env.example](.env.example)) or export it as an environment variable.
+2. Run only the live test (no Docker needed):
+
+   ```bash
+   ./mvnw test -Plive          # Windows: .\mvnw.cmd test -Plive
+   ```
+
+It logs the model, latency, stop reason, input/output tokens, and whether any thinking blocks came back, then the generated headlines and descriptions. Without a key it fails immediately with "API key not configured" and makes no request.
+
 ## Roadmap
 
 - [x] M0: Skeleton, CI, docs scaffolding

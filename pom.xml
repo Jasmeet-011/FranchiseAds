@@ -30,6 +30,8 @@
 		<java.version>21</java.version>
 		<!-- Empty default so surefire's late-replaced @{argLine} always resolves (see Mockito javadoc 0.3). -->
 		<argLine/>
+		<!-- Read by surefire. Tests tagged "live" call the real Claude API: never in verify or CI. Run them with -Plive. -->
+		<excludedGroups>live</excludedGroups>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -138,5 +140,16 @@
 			</plugin>
 		</plugins>
 	</build>
+
+	<profiles>
+		<!-- Only the live smoke test against the real Claude API; needs ANTHROPIC_API_KEY in the environment or .env. -->
+		<profile>
+			<id>live</id>
+			<properties>
+				<groups>live</groups>
+				<excludedGroups/>
+			</properties>
+		</profile>
+	</profiles>
 
 </project>
