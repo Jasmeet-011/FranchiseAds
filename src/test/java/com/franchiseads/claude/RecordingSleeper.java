@@ -5,7 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** Records each requested delay and returns at once, so retry tests never wait. */
-final class RecordingSleeper implements Sleeper {
+class RecordingSleeper implements Sleeper {
 
 	private final List<Duration> sleeps = new ArrayList<>();
 

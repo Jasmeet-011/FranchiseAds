@@ -27,7 +27,9 @@ import com.github.tomakehurst.wiremock.junit5.WireMockExtension;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.http.HttpTimeoutException;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Locale;
 import java.util.function.DoubleSupplier;
 import org.junit.jupiter.api.Test;
@@ -334,6 +336,107 @@ class ClaudeClientTests {
 			.hasMessage("Claude unavailable after 1 attempt: HTTP 500");
 		verifyRequests(1);
 		assertThat(sleeper.sleeps()).isEmpty();
+	}
+
+	// --- request deadline (ADR-027) ---
+
+	private static final Instant NOW = Instant.parse("2026-11-01T12:00:00Z");
+
+	@Test
+	void clampsTheReadTimeoutToTheTimeLeftBeforeTheDeadline() {
+		// The stub would answer 200 after 1 s, well inside the 5 s read timeout. Only the 150 ms left before the
+		// deadline can make this attempt time out.
+		wireMock.stubFor(post("/v1/messages").willReturn(okJson(message("late")).withFixedDelay(1000)));
+		ClaudeClient client = new ClaudeClient(properties(wireMock.baseUrl(), API_KEY, Duration.ofSeconds(5), 1),
+				sleeper, () -> 0.0, Clock.systemUTC());
+		Instant deadline = Instant.now().plusMillis(150);
+
+		long start = System.nanoTime();
+		assertThatThrownBy(() -> client.complete("system", "user", deadline))
+			.isInstanceOf(ClaudeTimeoutException.class)
+			.hasMessageStartingWith("Claude timed out after 1 attempt: ")
+			.cause()
+			.isInstanceOf(ResourceAccessException.class)
+			.cause()
+			.isInstanceOf(HttpTimeoutException.class);
+		long elapsedMillis = Duration.ofNanos(System.nanoTime() - start).toMillis();
+
+		assertThat(elapsedMillis).isLessThan(900);
+		verifyRequests(1);
+	}
+
+	@Test
+	void keepsTheConfiguredReadTimeoutWhenTheDeadlineIsFurtherAway() {
+		wireMock.stubFor(post("/v1/messages").willReturn(okJson(message("in time")).withFixedDelay(300)));
+		ClaudeClient client = new ClaudeClient(properties(wireMock.baseUrl(), API_KEY, Duration.ofSeconds(5), 1),
+				sleeper, () -> 0.0, Clock.systemUTC());
+
+		assertThat(client.complete("system", "user", Instant.now().plusSeconds(10)).text()).isEqualTo("in time");
+		verifyRequests(1);
+	}
+
+	@Test
+	void sendsNothingWhenTheDeadlineHasPassed() {
+		wireMock.stubFor(post("/v1/messages").willReturn(okJson(message("hello"))));
+		ClaudeClient client = new ClaudeClient(properties(wireMock.baseUrl()), sleeper, () -> 0.0,
+				new MutableClock(NOW));
+
+		assertThatThrownBy(() -> client.complete("system", "user", NOW)).isInstanceOf(ClaudeTimeoutException.class)
+			.hasMessage("Claude deadline reached before attempt 1");
+		verifyRequests(0);
+	}
+
+	@Test
+	void doesNotWaitForARetryAfterThatPassesTheDeadline() {
+		wireMock.stubFor(post("/v1/messages")
+			.willReturn(aResponse().withStatus(429).withHeader("retry-after", "10")));
+		ClaudeClient client = new ClaudeClient(properties(wireMock.baseUrl()), sleeper, () -> 0.0,
+				new MutableClock(NOW));
+
+		assertThatThrownBy(() -> client.complete("system", "user", NOW.plusSeconds(5)))
+			.isInstanceOf(ClaudeTimeoutException.class)
+			.hasMessage("Claude deadline reached after 1 attempt, no time left to retry: HTTP 429");
+		verifyRequests(1);
+		assertThat(sleeper.sleeps()).isEmpty();
+	}
+
+	@Test
+	void retriesWhileTheBackoffFitsAndStopsWhenItDoesNot() {
+		wireMock.stubFor(post("/v1/messages").willReturn(aResponse().withStatus(500)));
+		MutableClock clock = new MutableClock(NOW);
+		RecordingSleeper advancingSleeper = new RecordingSleeper() {
+			@Override
+			public void sleep(Duration duration) {
+				super.sleep(duration);
+				clock.advance(duration);
+			}
+		};
+		ClaudeClient client = new ClaudeClient(properties(wireMock.baseUrl()), advancingSleeper, () -> 0.0, clock);
+
+		// 500 ms backoff fits in the 1 s budget; the next 1 s backoff, starting at 500 ms, doesn't.
+		assertThatThrownBy(() -> client.complete("system", "user", NOW.plusSeconds(1)))
+			.isInstanceOf(ClaudeTimeoutException.class)
+			.hasMessage("Claude deadline reached after 2 attempts, no time left to retry: HTTP 500");
+		verifyRequests(2);
+		assertThat(advancingSleeper.sleeps()).containsExactly(Duration.ofMillis(500));
+	}
+
+	@Test
+	void clampedSecondAttemptCanStillSucceed() {
+		stubSequence(aResponse().withStatus(503), okJson(message("hello")));
+		MutableClock clock = new MutableClock(NOW);
+		RecordingSleeper advancingSleeper = new RecordingSleeper() {
+			@Override
+			public void sleep(Duration duration) {
+				super.sleep(duration);
+				clock.advance(duration);
+			}
+		};
+		ClaudeClient client = new ClaudeClient(properties(wireMock.baseUrl()), advancingSleeper, () -> 0.0, clock);
+
+		// After the 500 ms backoff, 1.5 s are left: less than the 2 s read timeout, enough for the answer.
+		assertThat(client.complete("system", "user", NOW.plusSeconds(2)).text()).isEqualTo("hello");
+		verifyRequests(2);
 	}
 
 	// --- envelope vs. model output ---

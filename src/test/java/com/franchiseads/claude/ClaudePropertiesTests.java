@@ -22,7 +22,7 @@ class ClaudePropertiesTests {
 			assertThat(properties.maxTokens()).isEqualTo(4096);
 			assertThat(properties.effort()).isEqualTo(ClaudeProperties.Effort.LOW);
 			assertThat(properties.connectTimeout()).isEqualTo(Duration.ofSeconds(3));
-			assertThat(properties.readTimeout()).isEqualTo(Duration.ofSeconds(30));
+			assertThat(properties.readTimeout()).isEqualTo(Duration.ofSeconds(20));
 			assertThat(properties.maxAttempts()).isEqualTo(3);
 			assertThat(properties.initialBackoff()).isEqualTo(Duration.ofMillis(500));
 			assertThat(properties.maxJitter()).isEqualTo(0.25);

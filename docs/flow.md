@@ -133,8 +133,11 @@ Anything else is 409. `APPROVED` and `REJECTED` are terminal; a rejected locatio
 | connection refused or reset | yes | `ClaudeUnavailableException` |
 | 400, 401, 403, 404, any other 4xx | no, fail immediately | `ClaudeRequestException` |
 | no API key configured | no HTTP call at all | `ClaudeRequestException` |
+| the caller's deadline has passed, or the next retry delay would end after it | no (stops at once) | `ClaudeTimeoutException` |
 
-Max 3 attempts total. The last attempt decides the exception type. Backoff: 500ms, then 1s, each with up to 25% random jitter. If a retryable response (429 or 5xx) carries `retry-after` in whole seconds, that delay is used instead, capped at 10s and without jitter; any other `retry-after` value (an HTTP date, a fraction, garbage) is ignored in favor of the normal backoff. Defaults: connect timeout 3s, read timeout 30s. All configurable.
+Max 3 attempts total. The last attempt decides the exception type. Backoff: 500ms, then 1s, each with up to 25% random jitter. If a retryable response (429 or 5xx) carries `retry-after` in whole seconds, that delay is used instead, capped at 10s and without jitter; any other `retry-after` value (an HTTP date, a fraction, garbage) is ignored in favor of the normal backoff. Defaults: connect timeout 3s, read timeout 20s. All configurable. The read timeout bounds a whole attempt, connect included.
+
+**Deadline.** A caller can pass a deadline for the whole call, retries included (the generate flow does, see Latency budget). Each attempt's read timeout is then the configured one or the time left, whichever is shorter. No attempt starts once the deadline has passed, and a retry delay that would end at or after it isn't waited out: the call stops with `ClaudeTimeoutException` (504), whatever the last failure was.
 
 **Envelope vs. model output.** Retries are about the transport only. A valid Messages response whose text isn't valid ad copy is returned after one request; `AdCopyParser` rejects it and the generate flow's single regeneration (step 6) handles it. A `max_tokens` or `refusal` stop reason is treated the same way: the call succeeded, the output is unusable.
 

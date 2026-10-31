@@ -23,7 +23,7 @@ import org.springframework.validation.annotation.Validated;
  * @param effort sent as {@code output_config.effort}; {@link Effort#NONE} leaves the field out, for models that don't
  * support effort (ADR-026)
  * @param connectTimeout TCP connect timeout
- * @param readTimeout how long to wait for the response
+ * @param readTimeout how long one attempt may take, connect included; a request deadline can shorten it (ADR-027)
  * @param maxAttempts total attempts per call, including the first
  * @param initialBackoff delay before the second attempt; doubles for each later one
  * @param maxJitter up to this fraction of the backoff is added at random
@@ -34,7 +34,7 @@ import org.springframework.validation.annotation.Validated;
 public record ClaudeProperties(@DefaultValue("https://api.anthropic.com") @NotBlank String baseUrl, String apiKey,
 		@DefaultValue("claude-haiku-5-5") @NotBlank String model, @DefaultValue("4096") @Min(1) int maxTokens,
 		@DefaultValue("low") @NotNull Effort effort,
-		@DefaultValue("3s") @NotNull Duration connectTimeout, @DefaultValue("30s") @NotNull Duration readTimeout,
+		@DefaultValue("3s") @NotNull Duration connectTimeout, @DefaultValue("20s") @NotNull Duration readTimeout,
 		@DefaultValue("3") @Min(1) @Max(10) int maxAttempts, @DefaultValue("500ms") @NotNull Duration initialBackoff,
 		@DefaultValue("0.25") @DecimalMin("0.0") @DecimalMax("1.0") double maxJitter,
 		@DefaultValue("10s") @NotNull Duration retryAfterCap) {

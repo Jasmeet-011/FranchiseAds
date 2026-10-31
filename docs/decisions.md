@@ -171,3 +171,17 @@ Short ADRs. Each has context, the decision, and its consequences. Newest at the 
 | After | `low` | 1817 ms | 652 | 133 | 0 | 0 |
 
 Same brief and prompt in both runs. Output tokens fell from 624 to 133 (−79%), and none of the 133 went to thinking. The answer was valid in both (after: every headline ≤ 24 characters, descriptions under 80, no `!`). Each row is a single run, so the latency figures are approximate; the token counts are the reliable comparison.
+
+## ADR-027: Read timeout 20s and a 50s per-request deadline
+
+**Context:** With the M2 settings (3 attempts, read timeout 30s, `retry-after` capped at 10s) one model call could take 3 × 30 + 2 × 10 = 110s. Spring 7.0's `JdkClientHttpRequest` times the whole exchange, and the JDK starts its timer before connecting (`MultiExchange.responseAsyncImpl`), so the connect phase is inside the read timeout and adds nothing. A generate request makes up to two calls, and the regeneration only starts after call 1 returns. In the worst case call 1 succeeds on its third slow attempt with unusable output, and call 2 then fails the same way: **220s**. That is far above the 60s default idle timeout of the AWS load balancer planned for M6, which would cut the connection and return its own error page instead of our ProblemDetail. Live calls take about 2–4s (ADR-026).
+**Decision (owner-approved):** Read timeout default 20s. The generate flow gets a deadline of 50s from the start of the request (`franchiseads.generation.deadline`), shared by both model calls and passed to `ClaudeClient.complete(system, user, deadline)`:
+- Each attempt's read timeout is clamped to the time left before the deadline.
+- No attempt starts after the deadline. A retry delay that would end at or after it isn't waited out.
+- Either stop throws `ClaudeTimeoutException` (504), even when the last failure was a 429 or 5xx: the request ran out of time.
+- The deadline is measured with an injectable `Clock`.
+- The two-argument `complete` has no deadline and behaves as before.
+
+Spring 7.0.10's `JdkClientHttpRequestFactory` only has a factory-level `setReadTimeout`. So a clamped attempt uses a throwaway factory around the one shared `java.net.http.HttpClient` (same connection pool, same connect timeout) through `restClient.mutate()`. Unclamped attempts reuse the normal `RestClient`. Rejected: a custom `ClientHttpRequestFactory`, which can't reach `JdkClientHttpRequest`'s timeout, and wrapping the call in `Future.get(timeout)`, which would leave the HTTP exchange running after we give up.
+**Consequences:** The Claude phase of a generate request ends by start + 50s; loading and saving add milliseconds. Inside the budget, call 1 fits at most two full 20s attempts and a clamped third, and the regeneration gets what's left. A slow upstream gives fewer retries, not a longer request. `ClaudeClientTests` proves the clamp over HTTP: WireMock would answer 200 after 1s, inside a 5s read timeout, but with 150ms left before the deadline the attempt times out in under 900ms.
+

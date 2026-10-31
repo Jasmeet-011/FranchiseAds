@@ -3,7 +3,9 @@ package com.franchiseads.claude;
 import java.net.http.HttpClient;
 import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.function.DoubleSupplier;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
@@ -24,6 +26,10 @@ import tools.jackson.databind.node.ObjectNode;
  * Retries cover transport-level failures only: 429, any 5xx, timeouts, connection errors, and a 200 whose body
  * isn't a Messages response. A valid response whose text isn't valid ad copy is returned normally; the parser and
  * the regeneration step deal with it.
+ * <p>
+ * An optional deadline bounds the whole call, retries included (ADR-027): each attempt's read timeout is clamped to
+ * the time left, and the client stops with {@link ClaudeTimeoutException} instead of starting an attempt or a retry
+ * delay that can't finish in time.
  */
 public class ClaudeClient {
 
@@ -37,33 +43,58 @@ public class ClaudeClient {
 
 	private final ClaudeProperties properties;
 
+	/** Shared by every attempt, so clamped attempts reuse the same connection pool. */
+	private final HttpClient httpClient;
+
 	private final RestClient restClient;
 
 	private final Sleeper sleeper;
 
 	private final DoubleSupplier jitter;
 
+	private final Clock clock;
+
 	private final JsonMapper json = JsonMapper.shared();
+
+	public ClaudeClient(ClaudeProperties properties, Sleeper sleeper, DoubleSupplier jitter) {
+		this(properties, sleeper, jitter, Clock.systemUTC());
+	}
 
 	/**
 	 * @param sleeper waits between attempts
 	 * @param jitter returns values in [0, 1); scales the random part of the backoff
+	 * @param clock measures the time left before a deadline
 	 */
-	public ClaudeClient(ClaudeProperties properties, Sleeper sleeper, DoubleSupplier jitter) {
+	public ClaudeClient(ClaudeProperties properties, Sleeper sleeper, DoubleSupplier jitter, Clock clock) {
 		this.properties = properties;
-		this.restClient = restClient(properties);
+		this.httpClient = HttpClient.newBuilder()
+			.connectTimeout(properties.connectTimeout())
+			.version(HttpClient.Version.HTTP_1_1)
+			.build();
+		this.restClient = RestClient.builder()
+			.requestFactory(requestFactory(properties.readTimeout()))
+			.baseUrl(properties.baseUrl())
+			.defaultHeader("anthropic-version", API_VERSION)
+			.build();
 		this.sleeper = sleeper;
 		this.jitter = jitter;
+		this.clock = clock;
+	}
+
+	/** {@link #complete(String, String, Instant)} without a deadline. */
+	public ClaudeResponse complete(String system, String user) {
+		return complete(system, user, null);
 	}
 
 	/**
 	 * Sends one single-turn request and returns the model's text, retrying transient failures up to
 	 * {@code maxAttempts} times in total. No API key means {@link ClaudeRequestException} before any HTTP call.
+	 * @param deadline when the whole call, retries included, must be over; null for none
 	 * @throws ClaudeRequestException non-retryable 4xx, or no API key
 	 * @throws ClaudeUnavailableException 429, 5xx, connection error or invalid response on every attempt
-	 * @throws ClaudeTimeoutException the last attempt timed out
+	 * @throws ClaudeTimeoutException the last attempt timed out, or the deadline left no time for an attempt or a retry
 	 */
-	public ClaudeResponse complete(String system, String user) {
+	public ClaudeResponse complete(String system, String user, Instant deadline) {
 		if (!properties.hasApiKey()) {
 			throw new ClaudeRequestException("API key not configured");
 		}
@@ -73,7 +104,8 @@ public class ClaudeClient {
 		byte[] body = requestBody(system, user);
 		int maxAttempts = properties.maxAttempts();
 		for (int attempt = 1;; attempt++) {
-			AttemptResult result = attempt(body, attempt, maxAttempts);
+			Duration timeout = attemptTimeout(deadline, attempt, maxAttempts);
+			AttemptResult result = attempt(body, attempt, maxAttempts, timeout);
 			if (result.response() != null) {
 				return result.response();
 			}
@@ -81,6 +113,13 @@ public class ClaudeClient {
 				throw result.toException(attempt);
 			}
 			Duration delay = retryDelay(attempt, result.retryAfter());
+			if (deadline != null && !clock.instant().plus(delay).isBefore(deadline)) {
+				log.warn("Claude attempt {}/{} failed ({}); a {} ms retry delay would pass the request deadline, giving up",
+						attempt, maxAttempts, result.description(), delay.toMillis());
+				throw new ClaudeTimeoutException("Claude deadline reached after " + attempt + " attempt"
+						+ ((attempt == 1) ? "" : "s") + ", no time left to retry: " + result.description(),
+						result.cause());
+			}
 			log.warn("Claude attempt {}/{} failed ({}); retrying in {} ms", attempt, maxAttempts,
 					result.description(), delay.toMillis());
 			try {
@@ -94,12 +133,34 @@ public class ClaudeClient {
 		}
 	}
 
+	/**
+	 * The read timeout for the next attempt: the configured one, or the time left before the deadline if that's
+	 * shorter. No time left means no attempt.
+	 */
+	private Duration attemptTimeout(Instant deadline, int attempt, int maxAttempts) {
+		Duration readTimeout = properties.readTimeout();
+		if (deadline == null) {
+			return readTimeout;
+		}
+		Duration remaining = Duration.between(clock.instant(), deadline);
+		if (remaining.isNegative() || remaining.isZero()) {
+			log.warn("Claude attempt {}/{} not started: the request deadline has passed", attempt, maxAttempts);
+			throw new ClaudeTimeoutException("Claude deadline reached before attempt " + attempt, null);
+		}
+		if (remaining.compareTo(readTimeout) < 0) {
+			log.info("Claude attempt {}/{}: read timeout clamped to {} ms by the request deadline", attempt,
+					maxAttempts, remaining.toMillis());
+			return remaining;
+		}
+		return readTimeout;
+	}
+
 	/** One HTTP exchange: a response, a retryable failure, or a thrown {@link ClaudeRequestException}. */
-	private AttemptResult attempt(byte[] body, int attempt, int maxAttempts) {
+	private AttemptResult attempt(byte[] body, int attempt, int maxAttempts, Duration timeout) {
 		long start = System.nanoTime();
 		RawResponse response;
 		try {
-			response = send(body);
+			response = send(body, timeout);
 		}
 		catch (ResourceAccessException ex) {
 			log.info("Claude attempt {}/{}: no response after {} ms: {}", attempt, maxAttempts, elapsedMillis(start),
@@ -159,18 +220,22 @@ public class ClaudeClient {
 		return Duration.ofSeconds(Long.parseLong(value));
 	}
 
-	private static RestClient restClient(ClaudeProperties properties) {
-		HttpClient httpClient = HttpClient.newBuilder()
-			.connectTimeout(properties.connectTimeout())
-			.version(HttpClient.Version.HTTP_1_1)
-			.build();
+	/**
+	 * The read timeout lives on the request factory; Spring 7.0's {@link JdkClientHttpRequestFactory} has no
+	 * per-request setting. It covers the whole exchange, connect included (ADR-027).
+	 */
+	private JdkClientHttpRequestFactory requestFactory(Duration readTimeout) {
 		JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
-		requestFactory.setReadTimeout(properties.readTimeout());
-		return RestClient.builder()
-			.requestFactory(requestFactory)
-			.baseUrl(properties.baseUrl())
-			.defaultHeader("anthropic-version", API_VERSION)
-			.build();
+		requestFactory.setReadTimeout(readTimeout);
+		return requestFactory;
+	}
+
+	/** The shared client, or for a clamped attempt a copy whose factory has the shorter timeout. */
+	private RestClient restClient(Duration timeout) {
+		if (timeout.equals(properties.readTimeout())) {
+			return restClient;
+		}
+		return restClient.mutate().requestFactory(requestFactory(timeout)).build();
 	}
 
 	private byte[] requestBody(String system, String user) {
@@ -185,8 +250,8 @@ public class ClaudeClient {
 		return json.writeValueAsString(root).getBytes(StandardCharsets.UTF_8);
 	}
 
-	private RawResponse send(byte[] body) {
-		return restClient.post()
+	private RawResponse send(byte[] body, Duration timeout) {
+		return restClient(timeout).post()
 			.uri(MESSAGES_PATH)
 			.header("x-api-key", properties.apiKey())
 			.contentType(MediaType.APPLICATION_JSON)
