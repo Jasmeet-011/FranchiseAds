@@ -150,7 +150,7 @@ Max 3 attempts total. The last attempt decides the exception type. Backoff: 500m
 
 ## Error mapping
 
-All errors are `ProblemDetail` (RFC 9457). Internal details and stack traces are never returned.
+All errors are `ProblemDetail` (RFC 9457). Internal details and stack traces are never returned. The 502/503/504 responses carry fixed details ("The AI provider is unavailable. Try again later." and so on); Claude's error text and request IDs go only to the log. When an earlier call did produce parseable copy, a Claude failure doesn't reach the client at all: the variant is saved flagged and returned with 201 (step 7).
 
 | Situation | Status |
 |---|---|
@@ -160,14 +160,14 @@ All errors are `ProblemDetail` (RFC 9457). Internal details and stack traces are
 | Unknown path | 404 |
 | Wrong HTTP method / unsupported content type | 405 / 415 |
 | Brand, location, campaign, or variant not found (including the parent brand of a nested create or list) | 404 |
-| Location doesn't belong to the campaign's brand | 422 |
+| Location doesn't belong to the campaign's brand | 422, detail names the location and campaign |
 | Duplicate brand name, ignoring case (`uq_brand_name_lower`) | 409 |
 | Illegal status transition, or submitting a flagged variant | 409 |
 | Concurrent modification (`@Version`) | 409 |
-| Model output malformed on both attempts | 502 |
-| Claude rejected our request (non-retryable 4xx, e.g. bad key), or no API key is configured | 502, logged at ERROR |
-| Claude 429 or 5xx after all retries | 503 |
-| Claude timed out after all retries | 504 |
+| Model output malformed on both attempts (no call produced parseable copy) | 502 |
+| Claude rejected our request (non-retryable 4xx, e.g. bad key), or no API key is configured, and no call produced parseable copy | 502, logged at ERROR |
+| Claude 429 or 5xx after all retries, and no call produced parseable copy | 503 |
+| Claude timed out after all retries, or the 50s request deadline ran out, and no call produced parseable copy | 504 |
 | Anything unexpected, including an unmapped database integrity violation | 500, generic message, logged at ERROR |
 
 ## Latency budget

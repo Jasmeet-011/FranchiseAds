@@ -1,5 +1,10 @@
 package com.franchiseads.common.error;
 
+import com.franchiseads.claude.ClaudeRequestException;
+import com.franchiseads.claude.ClaudeTimeoutException;
+import com.franchiseads.claude.ClaudeUnavailableException;
+import com.franchiseads.generation.LocationBrandMismatchException;
+import com.franchiseads.generation.MalformedAdCopyException;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -23,7 +28,8 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 /**
  * Turns every error into an RFC 9457 {@link ProblemDetail}. Framework errors (unreadable body, wrong method,
  * missing parameter, ...) are handled by {@link ResponseEntityExceptionHandler}; status codes follow
- * docs/flow.md. Internal details never reach the client.
+ * docs/flow.md. Internal details never reach the client: upstream (Claude) failures get fixed details, and their
+ * messages, which can quote Claude's error body, only go to the log.
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
@@ -59,6 +65,40 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 	@ExceptionHandler(ResourceNotFoundException.class)
 	ProblemDetail handleNotFound(ResourceNotFoundException ex) {
 		return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+	}
+
+	@ExceptionHandler(LocationBrandMismatchException.class)
+	ProblemDetail handleLocationBrandMismatch(LocationBrandMismatchException ex) {
+		return ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_CONTENT, ex.getMessage());
+	}
+
+	/** Reaches here only when no attempt produced parseable copy (ADR-030). */
+	@ExceptionHandler(MalformedAdCopyException.class)
+	ProblemDetail handleMalformedAdCopy(MalformedAdCopyException ex) {
+		log.warn("Generation failed: {}", ex.getMessage());
+		return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY,
+				"The AI model did not return usable ad copy. Try again.");
+	}
+
+	/** Our request was rejected (bad key, invalid request) or no key is configured: a bug or misconfiguration. */
+	@ExceptionHandler(ClaudeRequestException.class)
+	ProblemDetail handleClaudeRequest(ClaudeRequestException ex) {
+		log.error("Claude rejected the request", ex);
+		return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_GATEWAY, "The AI provider rejected the request.");
+	}
+
+	@ExceptionHandler(ClaudeUnavailableException.class)
+	ProblemDetail handleClaudeUnavailable(ClaudeUnavailableException ex) {
+		log.warn("Generation failed: {}", ex.getMessage());
+		return ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE,
+				"The AI provider is unavailable. Try again later.");
+	}
+
+	@ExceptionHandler(ClaudeTimeoutException.class)
+	ProblemDetail handleClaudeTimeout(ClaudeTimeoutException ex) {
+		log.warn("Generation failed: {}", ex.getMessage());
+		return ProblemDetail.forStatusAndDetail(HttpStatus.GATEWAY_TIMEOUT,
+				"The AI provider did not respond in time. Try again later.");
 	}
 
 	@ExceptionHandler(DataIntegrityViolationException.class)

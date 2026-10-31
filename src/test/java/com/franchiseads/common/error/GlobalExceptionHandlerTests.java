@@ -9,6 +9,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.franchiseads.claude.ClaudeRequestException;
+import com.franchiseads.claude.ClaudeTimeoutException;
+import com.franchiseads.claude.ClaudeUnavailableException;
+import com.franchiseads.generation.LocationBrandMismatchException;
+import com.franchiseads.generation.MalformedAdCopyException;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
@@ -17,6 +22,8 @@ import java.util.List;
 import org.hibernate.exception.ConstraintViolationException;
 import org.hibernate.exception.ConstraintViolationException.ConstraintKind;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -146,6 +153,33 @@ class GlobalExceptionHandlerTests {
 			.andExpect(content().string(not(containsString("secret"))));
 	}
 
+	@Test
+	void locationOfAnotherBrandIs422WithDetail() throws Exception {
+		mvc.perform(get("/stub/mismatch"))
+			.andExpect(status().isUnprocessableContent())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+			.andExpect(jsonPath("$.title").value("Unprocessable Content"))
+			.andExpect(jsonPath("$.detail").value("Location 42 does not belong to the brand of campaign 3"));
+	}
+
+	@ParameterizedTest(name = "{0} -> {1}")
+	@CsvSource(delimiter = '|', textBlock = """
+			malformed   | 502 | Bad Gateway         | The AI model did not return usable ad copy. Try again.
+			rejected    | 502 | Bad Gateway         | The AI provider rejected the request.
+			unavailable | 503 | Service Unavailable | The AI provider is unavailable. Try again later.
+			timeout     | 504 | Gateway Timeout     | The AI provider did not respond in time. Try again later.
+			""")
+	void claudeFailuresMapToFixedDetailsWithoutUpstreamText(String kind, int status, String title, String detail)
+			throws Exception {
+		mvc.perform(get("/stub/claude/{kind}", kind))
+			.andExpect(status().is(status))
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+			.andExpect(jsonPath("$.title").value(title))
+			.andExpect(jsonPath("$.detail").value(detail))
+			.andExpect(content().string(not(containsString("upstream-secret"))))
+			.andExpect(content().string(not(containsString("req_"))));
+	}
+
 	record StubRequest(@NotBlank String name, @Size(max = 3) List<@NotBlank String> tags) {
 	}
 
@@ -173,6 +207,23 @@ class GlobalExceptionHandlerTests {
 			SQLException sqlException = new SQLException("violation of " + constraint);
 			throw new DataIntegrityViolationException("could not execute statement",
 					new ConstraintViolationException("could not execute statement", sqlException, kind, constraint));
+		}
+
+		@GetMapping("/mismatch")
+		String mismatch() {
+			throw new LocationBrandMismatchException(42L, 3L);
+		}
+
+		@GetMapping("/claude/{kind}")
+		String claude(@PathVariable String kind) {
+			String upstream = "HTTP 400 invalid_request_error: upstream-secret (request-id req_123)";
+			throw switch (kind) {
+				case "malformed" -> new MalformedAdCopyException(upstream);
+				case "rejected" -> new ClaudeRequestException(upstream);
+				case "unavailable" -> new ClaudeUnavailableException(upstream, null);
+				case "timeout" -> new ClaudeTimeoutException(upstream, null);
+				default -> new IllegalArgumentException(kind);
+			};
 		}
 
 		@GetMapping("/boom")
