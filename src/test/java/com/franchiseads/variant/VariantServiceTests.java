@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -15,6 +17,8 @@ import jakarta.persistence.EntityManager;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 class VariantServiceTests {
 
@@ -94,6 +98,82 @@ class VariantServiceTests {
 
 		assertThatThrownBy(() -> service.get(5L)).isInstanceOf(ResourceNotFoundException.class)
 			.hasMessage("Variant 5 not found");
+	}
+
+	@Test
+	void submitMovesTheStoredDraftToPendingReviewAndFlushes() {
+		AdVariant variant = storedVariant(7L, true);
+
+		AdVariant submitted = service.submit(7L);
+
+		assertThat(submitted.getStatus()).isEqualTo(VariantStatus.PENDING_REVIEW);
+		verify(variants).saveAndFlush(variant);
+	}
+
+	@Test
+	void approveMovesAPendingVariantToApprovedAndFlushes() {
+		AdVariant variant = storedVariant(7L, true);
+		variant.submit();
+
+		AdVariant approved = service.approve(7L);
+
+		assertThat(approved.getStatus()).isEqualTo(VariantStatus.APPROVED);
+		verify(variants).saveAndFlush(variant);
+	}
+
+	@Test
+	void rejectStoresTheReasonAndFlushes() {
+		AdVariant variant = storedVariant(7L, true);
+		variant.submit();
+
+		AdVariant rejected = service.reject(7L, "Off-brand tone");
+
+		assertThat(rejected.getStatus()).isEqualTo(VariantStatus.REJECTED);
+		assertThat(rejected.getRejectionReason()).isEqualTo("Off-brand tone");
+		verify(variants).saveAndFlush(variant);
+	}
+
+	@Test
+	void refusedTransitionPropagatesAndNothingIsSaved() {
+		storedVariant(7L, true);
+
+		assertThatThrownBy(() -> service.approve(7L)).isInstanceOf(IllegalTransitionException.class);
+
+		verify(variants, never()).saveAndFlush(any());
+	}
+
+	@Test
+	void flaggedVariantIsNotSubmittedAndNothingIsSaved() {
+		AdVariant variant = storedVariant(8L, false);
+
+		assertThatThrownBy(() -> service.submit(8L)).isInstanceOf(IllegalTransitionException.class);
+
+		assertThat(variant.getStatus()).isEqualTo(VariantStatus.DRAFT);
+		verify(variants, never()).saveAndFlush(any());
+	}
+
+	@ParameterizedTest
+	@EnumSource(VariantAction.class)
+	void actionOnUnknownVariantIs404AndNothingIsSaved(VariantAction action) {
+		when(variants.findById(5L)).thenReturn(Optional.empty());
+
+		assertThatThrownBy(() -> {
+			switch (action) {
+				case SUBMIT -> service.submit(5L);
+				case APPROVE -> service.approve(5L);
+				case REJECT -> service.reject(5L, "Off-brand tone");
+			}
+		}).isInstanceOf(ResourceNotFoundException.class).hasMessage("Variant 5 not found");
+		verify(variants, never()).saveAndFlush(any());
+	}
+
+	private AdVariant storedVariant(Long id, boolean validationPassed) {
+		AdVariant variant = new AdVariant(campaign, location, List.of("Join Today"),
+				List.of("Your first month is on us."), validationPassed,
+				validationPassed ? List.of() : List.of("BLANK: headlines[1] is blank"), 1, "claude-haiku-5-5");
+		when(variants.findById(id)).thenReturn(Optional.of(variant));
+		when(variants.saveAndFlush(any(AdVariant.class))).thenAnswer(invocation -> invocation.getArgument(0));
+		return variant;
 	}
 
 	private void stubReferencesAndSave() {

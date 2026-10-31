@@ -5,6 +5,7 @@ import com.franchiseads.claude.ClaudeTimeoutException;
 import com.franchiseads.claude.ClaudeUnavailableException;
 import com.franchiseads.generation.LocationBrandMismatchException;
 import com.franchiseads.generation.MalformedAdCopyException;
+import com.franchiseads.variant.IllegalTransitionException;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -70,6 +71,15 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 	@ExceptionHandler(LocationBrandMismatchException.class)
 	ProblemDetail handleLocationBrandMismatch(LocationBrandMismatchException ex) {
 		return ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_CONTENT, ex.getMessage());
+	}
+
+	/** A review action the variant's status doesn't allow, or a submit of a flagged variant (ADR-032). */
+	@ExceptionHandler(IllegalTransitionException.class)
+	ProblemDetail handleIllegalTransition(IllegalTransitionException ex) {
+		ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+		problem.setProperty("currentStatus", ex.getCurrentStatus());
+		problem.setProperty("attemptedAction", ex.getAttemptedAction());
+		return problem;
 	}
 
 	/** Reaches here only when no attempt produced parseable copy (ADR-030). */

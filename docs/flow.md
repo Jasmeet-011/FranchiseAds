@@ -86,9 +86,13 @@ Maximum model calls per request: 2 (not counting transport retries).
   "descriptions": ["..."],
   "generationAttempts": 2,
   "model": "claude-haiku-5-5",
-  "createdAt": "2026-11-01T14:03:11Z"
+  "rejectionReason": null,
+  "createdAt": "2026-11-01T14:03:11Z",
+  "updatedAt": "2026-11-01T14:03:11Z"
 }
 ```
+
+`rejectionReason` is null unless the variant was rejected. `updatedAt` equals `createdAt` until the first status change, then moves with every change.
 
 ## Reading variants
 
@@ -131,7 +135,29 @@ stateDiagram-v2
 | approve | `POST /variants/{id}/approve` | `PENDING_REVIEW` |
 | reject | `POST /variants/{id}/reject` `{ "reason": "..." }` | `PENDING_REVIEW` |
 
-Anything else is 409. `APPROVED` and `REJECTED` are terminal; a rejected location gets a fresh variant by generating again. `AdVariant` carries a `@Version`, so concurrent approve and reject resolve to one winner and one 409.
+- Each action returns **200 with the updated variant** in the response shape above. Unknown ID → 404.
+- `submit` and `approve` take no body. `reject` requires `{ "reason": "..." }`: the reason is stripped of surrounding whitespace, then must be non-blank and at most 500 characters (the `rejection_reason` column), otherwise 400 with a field error for `reason`. A missing body is 400. The stripped reason is stored as `rejectionReason`.
+- The rules live in one place, `VariantStatus.next` (ADR-032). **Anything outside the table is 409**, including repeating an action (approving an `APPROVED` variant): actions aren't idempotent. The status is checked before the validation flag.
+- `APPROVED` and `REJECTED` are final; a rejected location gets a fresh variant by generating again.
+- `AdVariant` carries a `@Version`, so concurrent approve and reject resolve to one winner and one 409.
+
+Every refused action is a 409 `ProblemDetail` naming the current status and the attempted action (standard `type` and `title` fields omitted here):
+
+```json
+{
+  "status": 409,
+  "detail": "Can't approve a variant in status REJECTED: APPROVED and REJECTED are final. Generate a new variant for this location instead.",
+  "instance": "/variants/7/approve",
+  "currentStatus": "REJECTED",
+  "attemptedAction": "APPROVE"
+}
+```
+
+| Refused because | `detail` |
+|---|---|
+| wrong status, not final | `Can't approve a variant in status DRAFT: approve is allowed only from PENDING_REVIEW.` |
+| final status | `Can't approve a variant in status REJECTED: APPROVED and REJECTED are final. Generate a new variant for this location instead.` |
+| submit of a flagged variant | `Can't submit a variant that failed validation: flagged variants can't enter review. Generate a new variant for this location instead.` |
 
 ## Claude retry policy
 
@@ -159,15 +185,15 @@ All errors are `ProblemDetail` (RFC 9457). Internal details and stack traces are
 
 | Situation | Status |
 |---|---|
-| Bean validation failure | 400, with per-field errors: `"errors": [{"field": "bannedWords[1]", "message": "must not be blank"}]`, sorted by field |
-| Unreadable JSON request body | 400 |
+| Bean validation failure (including a blank or over-long reject `reason`) | 400, with per-field errors: `"errors": [{"field": "bannedWords[1]", "message": "must not be blank"}]`, sorted by field |
+| Unreadable or missing JSON request body | 400 |
 | Missing request parameter, non-numeric path ID, unknown `status` value | 400 |
 | Unknown path | 404 |
 | Wrong HTTP method / unsupported content type | 405 / 415 |
 | Brand, location, campaign, or variant not found (including the parent brand of a nested create or list) | 404 |
 | Location doesn't belong to the campaign's brand | 422, detail names the location and campaign |
 | Duplicate brand name, ignoring case (`uq_brand_name_lower`) | 409 |
-| Illegal status transition, or submitting a flagged variant | 409 |
+| Illegal status transition, repeating an action, or submitting a flagged variant | 409, with `currentStatus` and `attemptedAction` (see Approval flow) |
 | Concurrent modification (`@Version`) | 409 |
 | Model output malformed on both attempts (no call produced parseable copy) | 502 |
 | Claude rejected our request (non-retryable 4xx, e.g. bad key), or no API key is configured, and no call produced parseable copy | 502, logged at ERROR |

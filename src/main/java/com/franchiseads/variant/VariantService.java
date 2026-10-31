@@ -51,6 +51,34 @@ public class VariantService {
 
 	@Transactional(readOnly = true)
 	public AdVariant get(Long id) {
+		return load(id);
+	}
+
+	/** {@code DRAFT} to {@code PENDING_REVIEW}; a flagged variant is refused (409). */
+	@Transactional
+	public AdVariant submit(Long id) {
+		AdVariant variant = load(id);
+		variant.submit();
+		return variants.saveAndFlush(variant);
+	}
+
+	/** {@code PENDING_REVIEW} to {@code APPROVED}. */
+	@Transactional
+	public AdVariant approve(Long id) {
+		AdVariant variant = load(id);
+		variant.approve();
+		return variants.saveAndFlush(variant);
+	}
+
+	/** {@code PENDING_REVIEW} to {@code REJECTED}, storing the reason. */
+	@Transactional
+	public AdVariant reject(Long id, String reason) {
+		AdVariant variant = load(id);
+		variant.reject(reason);
+		return variants.saveAndFlush(variant);
+	}
+
+	private AdVariant load(Long id) {
 		return variants.findById(id).orElseThrow(() -> new ResourceNotFoundException("Variant", id));
 	}
 
