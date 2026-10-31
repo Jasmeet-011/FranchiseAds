@@ -58,7 +58,7 @@ All automated tests stub the Claude API with WireMock, so `./mvnw verify` and CI
    ./mvnw test -Plive          # Windows: .\mvnw.cmd test -Plive
    ```
 
-It logs the model, latency, stop reason, input/output tokens, and whether any thinking blocks came back, then the generated headlines and descriptions. Without a key it fails immediately with "API key not configured" and makes no request.
+It logs the model, the effort level sent, latency, stop reason, input/output tokens (and how many output tokens went to thinking), and whether any thinking blocks came back, then the generated headlines and descriptions. Without a key it fails immediately with "API key not configured" and makes no request.
 
 ## Roadmap
 

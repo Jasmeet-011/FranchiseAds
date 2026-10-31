@@ -21,8 +21,13 @@ final class ClaudeFixtures {
 	}
 
 	static ClaudeProperties properties(String baseUrl, String apiKey, Duration readTimeout, int maxAttempts) {
-		return new ClaudeProperties(baseUrl, apiKey, MODEL, 1024, Duration.ofSeconds(1), readTimeout, maxAttempts,
-				Duration.ofMillis(500), 0.25, Duration.ofSeconds(10));
+		return properties(baseUrl, apiKey, readTimeout, maxAttempts, ClaudeProperties.Effort.LOW);
+	}
+
+	static ClaudeProperties properties(String baseUrl, String apiKey, Duration readTimeout, int maxAttempts,
+			ClaudeProperties.Effort effort) {
+		return new ClaudeProperties(baseUrl, apiKey, MODEL, 1024, effort, Duration.ofSeconds(1), readTimeout,
+				maxAttempts, Duration.ofMillis(500), 0.25, Duration.ofSeconds(10));
 	}
 
 	/** A successful response with one text block. {@code text} must already be JSON-escaped. */

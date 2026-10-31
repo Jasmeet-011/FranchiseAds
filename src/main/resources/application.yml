@@ -28,6 +28,9 @@ franchiseads:
   claude:
     api-key: ${ANTHROPIC_API_KEY:}
     model: ${ANTHROPIC_MODEL:claude-haiku-5-5}
+    # Sent as output_config.effort (ADR-026). ANTHROPIC_EFFORT=none leaves the field out, for models that don't
+    # support effort.
+    effort: ${ANTHROPIC_EFFORT:low}
 
 management:
   endpoints:

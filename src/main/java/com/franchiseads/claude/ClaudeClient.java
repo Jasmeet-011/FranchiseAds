@@ -114,9 +114,11 @@ public class ClaudeClient {
 		if (status >= 200 && status < 300) {
 			try {
 				ClaudeResponse result = parseEnvelope(response.body());
-				log.info("Claude response: model={}, stop_reason={}, input_tokens={}, output_tokens={}, thinking_blocks={}",
+				log.info(
+						"Claude response: model={}, stop_reason={}, input_tokens={}, output_tokens={}, thinking_tokens={}, "
+								+ "thinking_blocks={}",
 						result.model(), result.stopReason(), result.inputTokens(), result.outputTokens(),
-						result.thinkingBlocks());
+						result.thinkingTokens(), result.thinkingBlocks());
 				return AttemptResult.success(result);
 			}
 			catch (InvalidEnvelopeException ex) {
@@ -175,6 +177,9 @@ public class ClaudeClient {
 		ObjectNode root = json.createObjectNode();
 		root.put("model", properties.model());
 		root.put("max_tokens", properties.maxTokens());
+		if (properties.effort().isSent()) {
+			root.putObject("output_config").put("effort", properties.effort().apiValue());
+		}
 		root.put("system", system);
 		root.putArray("messages").addObject().put("role", "user").put("content", user);
 		return json.writeValueAsString(root).getBytes(StandardCharsets.UTF_8);
@@ -222,7 +227,8 @@ public class ClaudeClient {
 		JsonNode usage = root.path("usage");
 		return new ClaudeResponse(text.toString(), stringOrNull(root.path("stop_reason")),
 				stringOrNull(root.path("model")), usage.path("input_tokens").asInt(0),
-				usage.path("output_tokens").asInt(0), thinkingBlocks);
+				usage.path("output_tokens").asInt(0), thinkingBlocks,
+				usage.path("output_tokens_details").path("thinking_tokens").asInt(0));
 	}
 
 	/** "HTTP 400 invalid_request_error: max_tokens: ... (request-id req_...)", from the documented error body. */

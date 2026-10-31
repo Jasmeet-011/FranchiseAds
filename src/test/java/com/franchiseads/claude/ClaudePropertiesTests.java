@@ -20,6 +20,7 @@ class ClaudePropertiesTests {
 			assertThat(properties.baseUrl()).isEqualTo("https://api.anthropic.com");
 			assertThat(properties.model()).isEqualTo("claude-haiku-5-5");
 			assertThat(properties.maxTokens()).isEqualTo(4096);
+			assertThat(properties.effort()).isEqualTo(ClaudeProperties.Effort.LOW);
 			assertThat(properties.connectTimeout()).isEqualTo(Duration.ofSeconds(3));
 			assertThat(properties.readTimeout()).isEqualTo(Duration.ofSeconds(30));
 			assertThat(properties.maxAttempts()).isEqualTo(3);
@@ -38,6 +39,36 @@ class ClaudePropertiesTests {
 				.isInstanceOf(ClaudeRequestException.class)
 				.hasMessage("API key not configured");
 		});
+	}
+
+	@Test
+	void bindsEffortIgnoringCase() {
+		contextRunner.withPropertyValues("franchiseads.claude.effort=High")
+			.run(context -> assertThat(context.getBean(ClaudeProperties.class).effort())
+				.isEqualTo(ClaudeProperties.Effort.HIGH));
+	}
+
+	@Test
+	void bindsNoneSoTheFieldCanBeLeftOut() {
+		contextRunner.withPropertyValues("franchiseads.claude.effort=none").run(context -> {
+			ClaudeProperties.Effort effort = context.getBean(ClaudeProperties.class).effort();
+			assertThat(effort).isEqualTo(ClaudeProperties.Effort.NONE);
+			assertThat(effort.isSent()).isFalse();
+		});
+	}
+
+	/** Pins Spring Boot's behavior that ruled out "empty means leave it out" (see {@code Effort}). */
+	@Test
+	void emptyEffortFallsBackToTheDefault() {
+		contextRunner.withPropertyValues("franchiseads.claude.effort=")
+			.run(context -> assertThat(context.getBean(ClaudeProperties.class).effort())
+				.isEqualTo(ClaudeProperties.Effort.LOW));
+	}
+
+	@Test
+	void rejectsUnknownEffort() {
+		contextRunner.withPropertyValues("franchiseads.claude.effort=extreme")
+			.run(context -> assertThat(context).hasFailed());
 	}
 
 	@Test

@@ -52,9 +52,11 @@ class ClaudeLiveSmokeTests {
 		ClaudeResponse response = client.complete(prompt.system(), prompt.user());
 		long latencyMillis = Duration.ofNanos(System.nanoTime() - start).toMillis();
 
-		log.info("LIVE SMOKE: model={}, latency={} ms (including any retries), stop_reason={}, input_tokens={}, "
-				+ "output_tokens={}, thinking_blocks={} ({})", response.model(), latencyMillis, response.stopReason(),
-				response.inputTokens(), response.outputTokens(), response.thinkingBlocks(),
+		log.info("LIVE SMOKE: model={}, effort={}, latency={} ms (including any retries), stop_reason={}, "
+				+ "input_tokens={}, output_tokens={}, thinking_tokens={}, thinking_blocks={} ({})", response.model(),
+				(properties.effort() != null) ? properties.effort().apiValue() : "<not sent>", latencyMillis,
+				response.stopReason(), response.inputTokens(), response.outputTokens(), response.thinkingTokens(),
+				response.thinkingBlocks(),
 				(response.thinkingBlocks() > 0) ? "thinking blocks came back" : "no thinking blocks");
 		log.info("LIVE SMOKE: raw text:\n{}", response.text());
 

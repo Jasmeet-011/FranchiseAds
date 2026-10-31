@@ -148,6 +148,24 @@ Short ADRs. Each has context, the decision, and its consequences. Newest at the 
 
 ## ADR-025: API version `2026-10-21`; no thinking or effort fields; `max_tokens` 4096
 
+*Partially superseded by ADR-026: the request now sends `output_config.effort`. The API version, `max_tokens` and "no thinking field" parts stand.*
+
 **Context:** The versioning docs list `2026-10-21` as current and recommend the latest. Its Messages changes (sampling parameters removed, document/citation placement) don't touch our request. The default model, `claude-haiku-5-5`, runs adaptive thinking by default at effort `medium`, and thinking tokens count against `max_tokens`.
 **Decision (owner-approved):** Send `anthropic-version: 2026-10-21`. Send only `model`, `max_tokens`, `system` and one user message, with no `thinking`, `effort` or sampling fields, so the request stays valid if `ANTHROPIC_MODEL` points at another model. Default `max_tokens` to 4096 to leave room for thinking; a `max_tokens` stop is treated as malformed output.
 **Consequences:** Thinking is billed as output. The live smoke test logs the token counts and whether thinking blocks came back, so the owner can decide whether to configure effort after a real run.
+
+## ADR-026: Send `output_config.effort`, default `low`; never send `thinking`
+
+**Context:** The M2 live run (ADR-025 request, no effort field) took 3632 ms, with 652 input and 624 output tokens and 1 thinking block. The JSON answer itself is roughly 120 tokens, so about 80% of the output was thinking, billed as output. The docs (platform.claude.com effort and thinking pages, read 2026-10-31) say:
+- `claude-haiku-5-5` supports effort `low`, `medium`, `high`, `xhigh`, `max`; the default is `medium`. Effort goes in `output_config.effort`. At `low`, the model "skips thinking for simple tasks".
+- Haiku 5.5 accepts `thinking: {"type": "disabled"}` only at effort `high` or below (400 at `xhigh`/`max`). Opus 5.5, Fable 5/5.1 and Sonnet 5.5 reject `disabled` at every level.
+- Effort is not supported on Haiku 4.5 or Sonnet 4.5.
+- The docs recommend lowering effort before disabling thinking.
+
+**Decision (owner-approved):** `ClaudeProperties.effort` (`ANTHROPIC_EFFORT`, default `low`, bound ignoring case), sent as `"output_config": {"effort": "low"}`. `ANTHROPIC_EFFORT=none` leaves the field out, which is the escape hatch for models without effort. An empty value can't serve as that switch: Spring Boot binds it to null and then applies the `@DefaultValue`, so it means `low` (pinned by `ClaudePropertiesTests`). No `thinking` field is sent, so the request stays valid on every current model at every effort level. `ClaudeResponse` also carries `usage.output_tokens_details.thinking_tokens` (0 when absent), logged per call and in the live test, so the thinking share is measured instead of estimated.
+**Consequences:** Less thinking and lower cost on the default model. `low` may still think on some requests; whether a run thought shows up in `thinking_tokens`. Pointing `ANTHROPIC_MODEL` at Haiku 4.5 or Sonnet 4.5 needs `ANTHROPIC_EFFORT=none` as well.
+
+| Live run | Effort sent | Latency | Input tokens | Output tokens | Thinking tokens | Thinking blocks |
+|---|---|---|---|---|---|---|
+| M2 (before) | none (model default `medium`) | 3632 ms | 652 | 624 | not logged | 1 |
+| After | `low` | pending: owner runs `-Plive` | | | | |

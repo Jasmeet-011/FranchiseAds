@@ -28,10 +28,12 @@ import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.http.HttpTimeoutException;
 import java.time.Duration;
+import java.util.Locale;
 import java.util.function.DoubleSupplier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.web.client.ResourceAccessException;
 
@@ -63,22 +65,62 @@ class ClaudeClientTests {
 
 		ClaudeResponse response = client().complete("system prompt", "user prompt");
 
-		assertThat(response).isEqualTo(new ClaudeResponse("hello", "end_turn", MODEL, 120, 45, 0));
+		assertThat(response).isEqualTo(new ClaudeResponse("hello", "end_turn", MODEL, 120, 45, 0, 0));
 		verifyRequests(1);
 		assertThat(sleeper.sleeps()).isEmpty();
 	}
 
 	@Test
-	void sendsModelMaxTokensSystemAndSingleUserMessage() {
+	void sendsModelMaxTokensEffortSystemAndSingleUserMessage() {
 		wireMock.stubFor(post("/v1/messages").willReturn(okJson(message("ok"))));
 
 		client().complete("Be brief.", "Write ads.");
 
 		wireMock.verify(postRequestedFor(urlEqualTo("/v1/messages")).withRequestBody(equalToJson("""
-				{"model":"claude-haiku-5-5","max_tokens":1024,"system":"Be brief.",
+				{"model":"claude-haiku-5-5","max_tokens":1024,"output_config":{"effort":"low"},"system":"Be brief.",
 				 "messages":[{"role":"user","content":"Write ads."}]}
 				""")));
 		verifyRequests(1);
+	}
+
+	@ParameterizedTest
+	@EnumSource(value = ClaudeProperties.Effort.class, names = "NONE", mode = EnumSource.Mode.EXCLUDE)
+	void sendsEachEffortLevelInLowerCase(ClaudeProperties.Effort effort) {
+		wireMock.stubFor(post("/v1/messages").willReturn(okJson(message("ok"))));
+
+		client(properties(wireMock.baseUrl(), API_KEY, Duration.ofSeconds(2), 3, effort)).complete("s", "u");
+
+		String expected = "{\"output_config\":{\"effort\":\"" + effort.name().toLowerCase(Locale.ROOT) + "\"}}";
+		wireMock.verify(postRequestedFor(urlEqualTo("/v1/messages")).withRequestBody(equalToJson(expected, false, true)));
+	}
+
+	@Test
+	void omitsOutputConfigWhenEffortIsNone() {
+		wireMock.stubFor(post("/v1/messages").willReturn(okJson(message("ok"))));
+
+		client(properties(wireMock.baseUrl(), API_KEY, Duration.ofSeconds(2), 3, ClaudeProperties.Effort.NONE)).complete("Be brief.",
+				"Write ads.");
+
+		wireMock.verify(postRequestedFor(urlEqualTo("/v1/messages")).withRequestBody(equalToJson("""
+				{"model":"claude-haiku-5-5","max_tokens":1024,"system":"Be brief.",
+				 "messages":[{"role":"user","content":"Write ads."}]}
+				""")));
+	}
+
+	@Test
+	void readsThinkingTokensFromUsageDetails() {
+		wireMock.stubFor(post("/v1/messages").willReturn(okJson("""
+				{"id":"msg_01","type":"message","role":"assistant","model":"claude-haiku-5-5",
+				 "content":[{"type":"thinking","thinking":"","signature":"sig"},{"type":"text","text":"ok"}],
+				 "stop_reason":"end_turn","stop_sequence":null,
+				 "usage":{"input_tokens":652,"output_tokens":624,"output_tokens_details":{"thinking_tokens":500}}}
+				""")));
+
+		ClaudeResponse response = client().complete("system", "user");
+
+		assertThat(response.outputTokens()).isEqualTo(624);
+		assertThat(response.thinkingTokens()).isEqualTo(500);
+		assertThat(response.thinkingBlocks()).isEqualTo(1);
 	}
 
 	@Test

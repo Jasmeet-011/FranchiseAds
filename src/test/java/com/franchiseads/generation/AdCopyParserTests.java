@@ -21,7 +21,7 @@ class AdCopyParserTests {
 	}
 
 	private static ClaudeResponse response(String text, String stopReason) {
-		return new ClaudeResponse(text, stopReason, "claude-haiku-5-5", 100, 50, 0);
+		return new ClaudeResponse(text, stopReason, "claude-haiku-5-5", 100, 50, 0, 0);
 	}
 
 	@Test
