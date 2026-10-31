@@ -1,8 +1,11 @@
 package com.franchiseads.variant;
 
 import com.franchiseads.campaign.Campaign;
+import com.franchiseads.campaign.CampaignService;
+import com.franchiseads.common.error.ResourceNotFoundException;
 import com.franchiseads.location.Location;
 import jakarta.persistence.EntityManager;
+import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -11,10 +14,13 @@ public class VariantService {
 
 	private final AdVariantRepository variants;
 
+	private final CampaignService campaignService;
+
 	private final EntityManager entityManager;
 
-	VariantService(AdVariantRepository variants, EntityManager entityManager) {
+	VariantService(AdVariantRepository variants, CampaignService campaignService, EntityManager entityManager) {
 		this.variants = variants;
+		this.campaignService = campaignService;
 		this.entityManager = entityManager;
 	}
 
@@ -29,6 +35,23 @@ public class VariantService {
 		return variants.save(new AdVariant(campaign, location, generated.headlines(), generated.descriptions(),
 				generated.violations().isEmpty(), generated.violations(), generated.generationAttempts(),
 				generated.model()));
+	}
+
+	/**
+	 * Variants of an existing campaign, oldest first, optionally only those in one status. An unknown campaign is
+	 * 404, not an empty list (ADR-018).
+	 * @param status null for every status
+	 */
+	@Transactional(readOnly = true)
+	public List<AdVariant> listForCampaign(Long campaignId, VariantStatus status) {
+		campaignService.get(campaignId);
+		return (status == null) ? variants.findAllByCampaignIdOrderByIdAsc(campaignId)
+				: variants.findAllByCampaignIdAndStatusOrderByIdAsc(campaignId, status);
+	}
+
+	@Transactional(readOnly = true)
+	public AdVariant get(Long id) {
+		return variants.findById(id).orElseThrow(() -> new ResourceNotFoundException("Variant", id));
 	}
 
 }

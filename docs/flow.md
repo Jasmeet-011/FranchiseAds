@@ -90,6 +90,11 @@ Maximum model calls per request: 2 (not counting transport retries).
 }
 ```
 
+## Reading variants
+
+- `GET /variants/{id}` returns one variant in the response shape above; unknown ID → 404.
+- `GET /campaigns/{campaignId}/variants` lists the campaign's variants, flagged ones included, oldest first. Optional `?status=` takes the exact status names (`DRAFT`, `PENDING_REVIEW`, `APPROVED`, `REJECTED`); any other value, lowercase included, → 400. Unknown campaign → 404, never an empty list (ADR-018).
+
 ## Validation rules
 
 | Rule | Applies to | Detail | Message |
@@ -156,7 +161,7 @@ All errors are `ProblemDetail` (RFC 9457). Internal details and stack traces are
 |---|---|
 | Bean validation failure | 400, with per-field errors: `"errors": [{"field": "bannedWords[1]", "message": "must not be blank"}]`, sorted by field |
 | Unreadable JSON request body | 400 |
-| Missing request parameter, non-numeric path ID | 400 |
+| Missing request parameter, non-numeric path ID, unknown `status` value | 400 |
 | Unknown path | 404 |
 | Wrong HTTP method / unsupported content type | 405 / 415 |
 | Brand, location, campaign, or variant not found (including the parent brand of a nested create or list) | 404 |
