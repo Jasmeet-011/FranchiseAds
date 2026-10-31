@@ -119,15 +119,20 @@ Anything else is 409. `APPROVED` and `REJECTED` are terminal; a rejected locatio
 
 ## Claude retry policy
 
-| Upstream result | Retry? |
-|---|---|
-| 200 | no |
-| 429 | yes, honor `retry-after` (capped at 10s) |
-| 500, 502, 503, 504, 529 | yes |
-| connect or read timeout | yes |
-| 400, 401, 403, 404, other 4xx | no, fail immediately |
+| Upstream result | Retry? | After the last attempt |
+|---|---|---|
+| 2xx with a valid Messages response | no, returned | n/a |
+| 2xx whose body isn't a Messages response (not JSON, no `content` array, a text block without a string) | yes | `ClaudeUnavailableException` |
+| 429 | yes | `ClaudeUnavailableException` |
+| any 5xx, including 529 | yes | `ClaudeUnavailableException` |
+| connect or read timeout | yes | `ClaudeTimeoutException` |
+| connection refused or reset | yes | `ClaudeUnavailableException` |
+| 400, 401, 403, 404, any other 4xx | no, fail immediately | `ClaudeRequestException` |
+| no API key configured | no HTTP call at all | `ClaudeRequestException` |
 
-Max 3 attempts total. Backoff: 500ms, then 1s, each with up to 25% random jitter. Defaults: connect timeout 3s, read timeout 30s. All configurable.
+Max 3 attempts total. The last attempt decides the exception type. Backoff: 500ms, then 1s, each with up to 25% random jitter. If a retryable response (429 or 5xx) carries `retry-after` in whole seconds, that delay is used instead, capped at 10s and without jitter; any other `retry-after` value (an HTTP date, a fraction, garbage) is ignored in favor of the normal backoff. Defaults: connect timeout 3s, read timeout 30s. All configurable.
+
+**Envelope vs. model output.** Retries are about the transport only. A valid Messages response whose text isn't valid ad copy is returned after one request; `AdCopyParser` rejects it and the generate flow's single regeneration (step 6) handles it. A `max_tokens` or `refusal` stop reason is treated the same way: the call succeeded, the output is unusable.
 
 ## Error mapping
 

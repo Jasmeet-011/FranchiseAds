@@ -1,5 +1,6 @@
 package com.franchiseads.claude;
 
+import java.util.concurrent.ThreadLocalRandom;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -10,7 +11,7 @@ public class ClaudeConfiguration {
 
 	@Bean
 	ClaudeClient claudeClient(ClaudeProperties properties) {
-		return new ClaudeClient(properties);
+		return new ClaudeClient(properties, Thread::sleep, () -> ThreadLocalRandom.current().nextDouble());
 	}
 
 }

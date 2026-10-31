@@ -2,6 +2,7 @@ package com.franchiseads.claude;
 
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -30,7 +31,7 @@ import org.springframework.validation.annotation.Validated;
 public record ClaudeProperties(@DefaultValue("https://api.anthropic.com") @NotBlank String baseUrl, String apiKey,
 		@DefaultValue("claude-haiku-5-5") @NotBlank String model, @DefaultValue("4096") @Min(1) int maxTokens,
 		@DefaultValue("3s") @NotNull Duration connectTimeout, @DefaultValue("30s") @NotNull Duration readTimeout,
-		@DefaultValue("3") @Min(1) int maxAttempts, @DefaultValue("500ms") @NotNull Duration initialBackoff,
+		@DefaultValue("3") @Min(1) @Max(10) int maxAttempts, @DefaultValue("500ms") @NotNull Duration initialBackoff,
 		@DefaultValue("0.25") @DecimalMin("0.0") @DecimalMax("1.0") double maxJitter,
 		@DefaultValue("10s") @NotNull Duration retryAfterCap) {
 

@@ -17,7 +17,11 @@ final class ClaudeFixtures {
 	}
 
 	static ClaudeProperties properties(String baseUrl, String apiKey) {
-		return new ClaudeProperties(baseUrl, apiKey, MODEL, 1024, Duration.ofSeconds(1), Duration.ofSeconds(2), 3,
+		return properties(baseUrl, apiKey, Duration.ofSeconds(2), 3);
+	}
+
+	static ClaudeProperties properties(String baseUrl, String apiKey, Duration readTimeout, int maxAttempts) {
+		return new ClaudeProperties(baseUrl, apiKey, MODEL, 1024, Duration.ofSeconds(1), readTimeout, maxAttempts,
 				Duration.ofMillis(500), 0.25, Duration.ofSeconds(10));
 	}
 

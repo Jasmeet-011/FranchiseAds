@@ -4,6 +4,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.function.DoubleSupplier;
+import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
@@ -16,7 +18,12 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
 /**
- * Calls the Claude Messages API ({@code POST /v1/messages}) on Spring's {@link RestClient} (ADR-008).
+ * Calls the Claude Messages API ({@code POST /v1/messages}) on Spring's {@link RestClient} (ADR-008), with the retry
+ * policy from docs/flow.md written out in {@link #complete} (ADR-009, ADR-022).
+ * <p>
+ * Retries cover transport-level failures only: 429, any 5xx, timeouts, connection errors, and a 200 whose body
+ * isn't a Messages response. A valid response whose text isn't valid ad copy is returned normally; the parser and
+ * the regeneration step deal with it.
  */
 public class ClaudeClient {
 
@@ -26,20 +33,35 @@ public class ClaudeClient {
 
 	private static final Logger log = LoggerFactory.getLogger(ClaudeClient.class);
 
+	private static final Pattern RETRY_AFTER_SECONDS = Pattern.compile("\\d{1,9}");
+
 	private final ClaudeProperties properties;
 
 	private final RestClient restClient;
 
+	private final Sleeper sleeper;
+
+	private final DoubleSupplier jitter;
+
 	private final JsonMapper json = JsonMapper.shared();
 
-	public ClaudeClient(ClaudeProperties properties) {
+	/**
+	 * @param sleeper waits between attempts
+	 * @param jitter returns values in [0, 1); scales the random part of the backoff
+	 */
+	public ClaudeClient(ClaudeProperties properties, Sleeper sleeper, DoubleSupplier jitter) {
 		this.properties = properties;
 		this.restClient = restClient(properties);
+		this.sleeper = sleeper;
+		this.jitter = jitter;
 	}
 
 	/**
-	 * Sends one single-turn request and returns the model's text. Throws a {@link ClaudeException} subtype when no
-	 * usable response arrives; no API key means {@link ClaudeRequestException} before any HTTP call.
+	 * Sends one single-turn request and returns the model's text, retrying transient failures up to
+	 * {@code maxAttempts} times in total. No API key means {@link ClaudeRequestException} before any HTTP call.
+	 * @throws ClaudeRequestException non-retryable 4xx, or no API key
+	 * @throws ClaudeUnavailableException 429, 5xx, connection error or invalid response on every attempt
+	 * @throws ClaudeTimeoutException the last attempt timed out
 	 */
 	public ClaudeResponse complete(String system, String user) {
 		if (!properties.hasApiKey()) {
@@ -49,38 +71,90 @@ public class ClaudeClient {
 			log.debug("Claude system prompt:\n{}\nClaude user prompt:\n{}", system, user);
 		}
 		byte[] body = requestBody(system, user);
+		int maxAttempts = properties.maxAttempts();
+		for (int attempt = 1;; attempt++) {
+			AttemptResult result = attempt(body, attempt, maxAttempts);
+			if (result.response() != null) {
+				return result.response();
+			}
+			if (attempt >= maxAttempts) {
+				throw result.toException(attempt);
+			}
+			Duration delay = retryDelay(attempt, result.retryAfter());
+			log.warn("Claude attempt {}/{} failed ({}); retrying in {} ms", attempt, maxAttempts,
+					result.description(), delay.toMillis());
+			try {
+				sleeper.sleep(delay);
+			}
+			catch (InterruptedException ex) {
+				Thread.currentThread().interrupt();
+				throw new ClaudeUnavailableException(
+						"Interrupted while waiting to retry Claude after: " + result.description(), ex);
+			}
+		}
+	}
+
+	/** One HTTP exchange: a response, a retryable failure, or a thrown {@link ClaudeRequestException}. */
+	private AttemptResult attempt(byte[] body, int attempt, int maxAttempts) {
 		long start = System.nanoTime();
 		RawResponse response;
 		try {
 			response = send(body);
 		}
 		catch (ResourceAccessException ex) {
-			log.warn("Claude call failed after {} ms: {}", elapsedMillis(start), ex.getMessage());
-			if (isTimeout(ex)) {
-				throw new ClaudeTimeoutException("Claude call timed out: " + ex.getMessage(), ex);
-			}
-			throw new ClaudeUnavailableException("Claude could not be reached: " + ex.getMessage(), ex);
+			log.info("Claude attempt {}/{}: no response after {} ms: {}", attempt, maxAttempts, elapsedMillis(start),
+					ex.getMessage());
+			return isTimeout(ex) ? AttemptResult.timeout(ex.getMessage(), ex)
+					: AttemptResult.unavailable(ex.getMessage(), ex, null);
 		}
-		log.info("Claude call: HTTP {} in {} ms (request-id {})", response.status(), elapsedMillis(start),
-				response.requestId());
+		log.info("Claude attempt {}/{}: HTTP {} in {} ms (request-id {})", attempt, maxAttempts, response.status(),
+				elapsedMillis(start), response.requestId());
 
-		if (response.status() >= 200 && response.status() < 300) {
+		int status = response.status();
+		if (status >= 200 && status < 300) {
 			try {
 				ClaudeResponse result = parseEnvelope(response.body());
 				log.info("Claude response: model={}, stop_reason={}, input_tokens={}, output_tokens={}, thinking_blocks={}",
 						result.model(), result.stopReason(), result.inputTokens(), result.outputTokens(),
 						result.thinkingBlocks());
-				return result;
+				return AttemptResult.success(result);
 			}
 			catch (InvalidEnvelopeException ex) {
-				throw new ClaudeUnavailableException("Claude returned an invalid Messages response: " + ex.getMessage()
-						+ requestIdSuffix(response.requestId()), ex);
+				return AttemptResult.unavailable("invalid Messages response: " + ex.getMessage()
+						+ requestIdSuffix(response.requestId()), ex, null);
 			}
 		}
-		if (response.status() == 429 || response.status() >= 500) {
-			throw new ClaudeUnavailableException("Claude unavailable: " + describeError(response), null);
+		if (status == 429 || status >= 500) {
+			return AttemptResult.unavailable(describeError(response), null, response.retryAfter());
 		}
 		throw new ClaudeRequestException("Claude rejected the request: " + describeError(response));
+	}
+
+	/**
+	 * A usable {@code retry-after} (whole seconds) wins, capped at {@code retryAfterCap}. Otherwise exponential
+	 * backoff from {@code initialBackoff}, plus up to {@code maxJitter} of it at random.
+	 */
+	private Duration retryDelay(int failedAttempt, String retryAfterHeader) {
+		Duration retryAfter = parseRetryAfter(retryAfterHeader);
+		if (retryAfter != null) {
+			return (retryAfter.compareTo(properties.retryAfterCap()) > 0) ? properties.retryAfterCap() : retryAfter;
+		}
+		Duration backoff = properties.initialBackoff().multipliedBy(1L << (failedAttempt - 1));
+		long jitterMillis = (long) (backoff.toMillis() * properties.maxJitter() * jitter.getAsDouble());
+		return backoff.plusMillis(jitterMillis);
+	}
+
+	/** Only the delta-seconds form. An HTTP date, a fraction or garbage falls back to the normal backoff. */
+	private static Duration parseRetryAfter(String header) {
+		if (header == null) {
+			return null;
+		}
+		String value = header.strip();
+		if (!RETRY_AFTER_SECONDS.matcher(value).matches()) {
+			log.info("Ignoring retry-after header that isn't whole seconds: '{}'", header);
+			return null;
+		}
+		return Duration.ofSeconds(Long.parseLong(value));
 	}
 
 	private static RestClient restClient(ClaudeProperties properties) {
@@ -198,6 +272,31 @@ public class ClaudeClient {
 	}
 
 	private record RawResponse(int status, String retryAfter, String requestId, String body) {
+	}
+
+	/** Either {@code response} is set, or the attempt failed in a way worth retrying. */
+	private record AttemptResult(ClaudeResponse response, boolean timedOut, String description, Throwable cause,
+			String retryAfter) {
+
+		static AttemptResult success(ClaudeResponse response) {
+			return new AttemptResult(response, false, null, null, null);
+		}
+
+		static AttemptResult timeout(String description, Throwable cause) {
+			return new AttemptResult(null, true, description, cause, null);
+		}
+
+		static AttemptResult unavailable(String description, Throwable cause, String retryAfter) {
+			return new AttemptResult(null, false, description, cause, retryAfter);
+		}
+
+		/** The last attempt decides the type: a final timeout is a timeout, anything else is unavailable. */
+		ClaudeException toException(int attempts) {
+			String summary = attempts + " attempt" + ((attempts == 1) ? "" : "s") + ": " + description;
+			return timedOut ? new ClaudeTimeoutException("Claude timed out after " + summary, cause)
+					: new ClaudeUnavailableException("Claude unavailable after " + summary, cause);
+		}
+
 	}
 
 	private static final class InvalidEnvelopeException extends Exception {
