@@ -115,6 +115,7 @@ Short ADRs. Each has context, the decision, and its consequences. Newest at the 
 **Context:** Boot 4.1.2 manages Jetty 12.1.14, Jackson 2.21.7 and httpclient5 5.6.5. The non-shaded `org.wiremock:wiremock-jetty12` 3.13.2, and `wiremock-spring-boot` 4.4.3 (built against Jetty 12.1.6), would have those versions forced onto them by Boot's dependency management. WireMock 4.x is still beta (4.0.0-beta.41).
 **Decision:** `org.wiremock:wiremock-standalone` 3.13.2, test scope. It shades all of its dependencies; the only unshaded classes are four `org.jspecify` annotations, identical to the ones Spring 7 uses. Client tests are plain JUnit with `WireMockExtension` (works under JUnit 6.0.3) and construct `ClaudeClient` directly. No Spring context, no Spring integration library.
 **Consequences:** No version conflicts with anything Boot manages. A 19.5 MB test jar. M4's end-to-end test will need its own wiring to point the app at WireMock (a dynamic `franchiseads.claude.base-url`).
+*M4 note:* `ApprovalWorkflowEndToEndTests` does that wiring with a static `WireMockExtension` (dynamic port) and a `@DynamicPropertySource` that supplies `claudeApi::baseUrl` plus the API key, model, effort and max attempts. The supplier is only read when the Spring context starts, which happens after the extension has started the server. Still no Spring integration library.
 
 ## ADR-020: JDK `HttpClient` request factory; timeouts detected by `HttpTimeoutException`
 
