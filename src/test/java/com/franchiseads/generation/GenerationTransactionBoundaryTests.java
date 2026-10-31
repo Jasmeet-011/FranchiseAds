@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
 import com.franchiseads.TestcontainersConfiguration;
+import com.franchiseads.TruncateTablesExtension;
 import com.franchiseads.brand.Brand;
 import com.franchiseads.brand.BrandRepository;
 import com.franchiseads.campaign.Campaign;
@@ -21,6 +22,7 @@ import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.stubbing.Answer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -35,6 +37,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  * variant is still saved. The mocked client records the transaction state at the moment of each call.
  */
 @Import(TestcontainersConfiguration.class)
+@ExtendWith(TruncateTablesExtension.class)
 @SpringBootTest
 class GenerationTransactionBoundaryTests {
 

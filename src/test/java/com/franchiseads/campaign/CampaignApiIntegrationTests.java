@@ -3,10 +3,12 @@ package com.franchiseads.campaign;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.franchiseads.TestcontainersConfiguration;
+import com.franchiseads.TruncateTablesExtension;
 import com.franchiseads.brand.dto.BrandResponse;
 import com.franchiseads.campaign.dto.CampaignResponse;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -15,6 +17,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.client.RestTestClient;
 
 @Import(TestcontainersConfiguration.class)
+@ExtendWith(TruncateTablesExtension.class)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureRestTestClient
 class CampaignApiIntegrationTests {

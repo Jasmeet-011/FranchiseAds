@@ -3,8 +3,10 @@ package com.franchiseads.brand;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.franchiseads.TestcontainersConfiguration;
+import com.franchiseads.TruncateTablesExtension;
 import com.franchiseads.brand.dto.BrandResponse;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -13,10 +15,11 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.client.RestTestClient;
 
 /**
- * Full stack over HTTP against Testcontainers Postgres. The database is shared by every test in this Spring
- * context, so each test uses brand names no other test uses.
+ * Full stack over HTTP against Testcontainers Postgres. The tables are truncated before each test
+ * ({@link TruncateTablesExtension}), so no test sees another's rows.
  */
 @Import(TestcontainersConfiguration.class)
+@ExtendWith(TruncateTablesExtension.class)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureRestTestClient
 class BrandApiIntegrationTests {

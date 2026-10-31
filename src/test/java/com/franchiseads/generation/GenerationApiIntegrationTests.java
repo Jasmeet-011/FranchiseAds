@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
 import com.franchiseads.TestcontainersConfiguration;
+import com.franchiseads.TruncateTablesExtension;
 import com.franchiseads.brand.dto.BrandResponse;
 import com.franchiseads.campaign.dto.CampaignResponse;
 import com.franchiseads.claude.ClaudeClient;
@@ -15,6 +16,7 @@ import com.franchiseads.variant.VariantStatus;
 import com.franchiseads.variant.dto.VariantResponse;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -25,6 +27,7 @@ import org.springframework.test.web.servlet.client.RestTestClient;
 
 /** The generate and variant endpoints over HTTP against Postgres, with only the Claude client mocked. */
 @Import(TestcontainersConfiguration.class)
+@ExtendWith(TruncateTablesExtension.class)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @AutoConfigureRestTestClient
 class GenerationApiIntegrationTests {
