@@ -22,8 +22,8 @@ This is a portfolio project. Correctness, test quality, and honest documentation
 - Java 21, Maven wrapper
 - Spring Boot 4.1.x: Web MVC, Data JPA (Hibernate), Validation, Actuator, Flyway
 - PostgreSQL 16 (docker-compose locally, Testcontainers in tests)
-- Tests: JUnit (version managed by Boot, currently 6), Mockito, MockMvc, Testcontainers 2.x
-- Added later: WireMock (M2), springdoc-openapi (M5)
+- Tests: JUnit (version managed by Boot, currently 6), Mockito, MockMvc, Testcontainers 2.x, WireMock (`org.wiremock:wiremock-standalone` 3.13.2, shaded; ADR-019)
+- Added later: springdoc-openapi (M5)
 
 ## Commands
 
@@ -40,7 +40,10 @@ docker compose down               # stop it (volume kept)
 .\mvnw.cmd spring-boot:run        # run against docker-compose Postgres
 .\mvnw.cmd spring-boot:test-run   # run with a Testcontainers Postgres, no compose needed
 curl http://localhost:8080/actuator/health
+.\mvnw.cmd test -Plive            # only the live Claude smoke test; real API call, needs ANTHROPIC_API_KEY. Owner runs it, never CI
 ```
+
+If `JAVA_HOME` is empty in your shell, set it for the command from the user environment: `$env:JAVA_HOME = [Environment]::GetEnvironmentVariable('JAVA_HOME','User')`.
 
 Linux / CI: same commands with `./mvnw` (CI runs `./mvnw -B verify`).
 
@@ -64,7 +67,7 @@ Rule: confirm every Spring class, annotation, import, and property exists in the
 
 Package by feature. Each feature owns its entity, repository, service, controller, and DTOs.
 
-Exists today (end of M1):
+Exists today (end of M2):
 
 ```
 src/main/java/com/franchiseads/
@@ -72,6 +75,9 @@ src/main/java/com/franchiseads/
   location/   Location, LocationRepository, LocationService, LocationController, dto/
   campaign/   Campaign, CampaignRepository, CampaignService, CampaignController, dto/
   variant/    AdVariant, AdVariantRepository, VariantStatus (entity only, no endpoints yet)
+  claude/     ClaudeClient (retry loop), ClaudeProperties, ClaudeConfiguration, ClaudeResponse, Sleeper, Claude*Exception
+  generation/ AdBrief, Prompt, PromptBuilder, AdCopy, AdCopyParser, MalformedAdCopyException (pure, not Spring beans yet)
+  validation/ AdCopyRules (+ AdCopyRulesConfiguration); the validator comes in M3
   common/     Strings (input normalization), error/ (GlobalExceptionHandler, ResourceNotFoundException)
 src/main/resources/application.yml         all config, env vars with local defaults
 src/main/resources/db/migration/V1__init.sql
@@ -81,6 +87,7 @@ src/test/java/com/franchiseads/
   PersistenceMappingTests.java             @DataJpaTest: V1 + validate, text[] round trips, unique index
   <feature>/  *ControllerTests (@WebMvcTest), *ServiceTests (Mockito), *ApiIntegrationTests (HTTP + Postgres)
   common/error/GlobalExceptionHandlerTests (stub controller in test sources)
+  claude/     ClaudeClientTests (WireMock, RecordingSleeper), ClaudePropertiesTests, ClaudeLiveSmokeTests (@Tag("live"))
 docker-compose.yml, .env.example, .github/workflows/ci.yml, docs/
 ```
 

@@ -109,3 +109,45 @@ Short ADRs. Each has context, the decision, and its consequences. Newest at the 
 **Context:** `GET /brands/{brandId}/locations` for a brand that doesn't exist could return `[]`, which is indistinguishable from a real brand with no locations.
 **Decision:** Every `/brands/{brandId}/...` endpoint (create and list) loads the brand first and returns 404 if it is missing.
 **Consequences:** Clients can tell a typo from an empty list, at the cost of one extra primary-key lookup per list call.
+
+## ADR-019: WireMock standalone (shaded) for HTTP-level Claude tests
+
+**Context:** Boot 4.1.2 manages Jetty 12.1.14, Jackson 2.21.7 and httpclient5 5.6.5. The non-shaded `org.wiremock:wiremock-jetty12` 3.13.2, and `wiremock-spring-boot` 4.4.3 (built against Jetty 12.1.6), would have those versions forced onto them by Boot's dependency management. WireMock 4.x is still beta (4.0.0-beta.41).
+**Decision:** `org.wiremock:wiremock-standalone` 3.13.2, test scope. It shades all of its dependencies; the only unshaded classes are four `org.jspecify` annotations, identical to the ones Spring 7 uses. Client tests are plain JUnit with `WireMockExtension` (works under JUnit 6.0.3) and construct `ClaudeClient` directly. No Spring context, no Spring integration library.
+**Consequences:** No version conflicts with anything Boot manages. A 19.5 MB test jar. M4's end-to-end test will need its own wiring to point the app at WireMock (a dynamic `franchiseads.claude.base-url`).
+
+## ADR-020: JDK `HttpClient` request factory; timeouts detected by `HttpTimeoutException`
+
+**Context:** The client needs both a connect timeout and a read timeout. A spike showed what `RestClient` throws for each failure.
+**Decision:** `JdkClientHttpRequestFactory` (in spring-web, no new dependency) over a `java.net.http.HttpClient` with `connectTimeout` and HTTP/1.1 pinned; the read timeout comes from `setReadTimeout`. A 300 ms read timeout against a 1500 ms WireMock delay throws `ResourceAccessException` caused by `java.net.http.HttpTimeoutException: Request cancelled`, after about 317 ms. Connection refused throws `ResourceAccessException` caused by `ConnectException`. A connect timeout is `HttpConnectTimeoutException`, a subclass of `HttpTimeoutException`. The client treats a `ResourceAccessException` with an `HttpTimeoutException` in its cause chain as a timeout, and any other one as a connection error.
+**Consequences:** Swapping the request factory changes the exception types (for comparison, `SimpleClientHttpRequestFactory` throws `SocketTimeoutException: Read timed out`), so `ClaudeClientTests` pins the cause chain.
+
+## ADR-021: A missing API key doesn't stop the app; the client refuses to call
+
+**Context:** CI and fresh clones have no `ANTHROPIC_API_KEY`, and all CRUD endpoints work without one. Failing startup would break CI, local runs and the health check for no benefit.
+**Decision:** `franchiseads.claude.api-key` defaults to empty. `ClaudeClient.complete` throws `ClaudeRequestException("API key not configured")` before building any request when the key is blank. `ClaudeProperties.toString()` masks the key.
+**Consequences:** A misconfigured deployment starts and looks healthy until the first generation, which fails with a clear 502 (once M3 maps it). Acceptable for this project; a deployment check can look for the key separately.
+
+## ADR-022: Retry transport failures only; the envelope vs. model-output boundary
+
+**Context:** flow.md's original table didn't cover connection errors, `retry-after` on 5xx, 5xx codes outside the list, or a 200 whose body isn't a Messages response.
+**Decision (owner-approved):** Retry 429, every 5xx (529 included), timeouts, connection errors (refused, reset), and a 2xx whose envelope is invalid (not JSON, no `content` array, a text block without a string). Honor a whole-seconds `retry-after` on any retryable response, capped at 10s and without jitter; anything else in that header falls back to the backoff. Every other 4xx fails immediately. The *envelope* is the transport's concern; the *model output* inside a valid envelope is not: garbage text, `max_tokens` and `refusal` are returned after one request, and `AdCopyParser` plus the single regeneration deal with them.
+**Consequences:** Client retries never multiply model calls for bad output, so the "at most 2 model calls" rule in flow.md stays meaningful. The final exception type follows the last attempt (timeout means 504, anything else 503).
+
+## ADR-023: Prompt-injection defense: tagged data sections with escaped angle brackets
+
+**Context:** Voice guidelines, banned words, local offers and campaign themes are user-supplied, and the regeneration prompt also carries model output and violation text quoting it.
+**Decision:** Each such value goes in its own tagged section (`<local_offer>…</local_offer>` etc.). The system prompt says tagged content is data and that instructions inside it must never be followed. `<` and `>` inside values are escaped to `&lt;`/`&gt;`, so a value can't close its own section and continue as instructions. Regeneration is one user message with the previous output inside `<previous_output>`, not a replayed assistant turn.
+**Consequences:** This reduces injection risk; it doesn't remove it, which is one more reason the validator decides, not the model (ADR-010). Values containing angle brackets reach the model escaped, which is harmless for ad copy.
+
+## ADR-024: `AdCopyRules` is the single source of counts and length limits
+
+**Context:** The prompt has to state the same counts and limits the validator enforces, and they're configurable within Google's limits.
+**Decision:** One `@ConfigurationProperties("franchiseads.ad-copy")` record, `AdCopyRules`: headline count 5 (3 to 15), description count 2 (2 to 4), headline max 30, description max 90, each bounded by Bean Validation. `PromptBuilder` interpolates them, and its tests use non-default rules to prove nothing is hard-coded. The M3 validator takes the same record.
+**Consequences:** A configuration change can't make the prompt and the validator disagree. Out-of-range values fail startup.
+
+## ADR-025: API version `2026-10-21`; no thinking or effort fields; `max_tokens` 4096
+
+**Context:** The versioning docs list `2026-10-21` as current and recommend the latest. Its Messages changes (sampling parameters removed, document/citation placement) don't touch our request. The default model, `claude-haiku-5-5`, runs adaptive thinking by default at effort `medium`, and thinking tokens count against `max_tokens`.
+**Decision (owner-approved):** Send `anthropic-version: 2026-10-21`. Send only `model`, `max_tokens`, `system` and one user message, with no `thinking`, `effort` or sampling fields, so the request stays valid if `ANTHROPIC_MODEL` points at another model. Default `max_tokens` to 4096 to leave room for thinking; a `max_tokens` stop is treated as malformed output.
+**Consequences:** Thinking is billed as output. The live smoke test logs the token counts and whether thinking blocks came back, so the owner can decide whether to configure effort after a real run.

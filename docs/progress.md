@@ -2,13 +2,13 @@
 
 ## Current Status
 
-M1 complete: Flyway V1 schema, entities for Brand, Location, Campaign and AdVariant, CRUD endpoints for brands, locations and campaigns, Bean Validation, and ProblemDetail error handling. `./mvnw verify` passes (66 tests). Next: M2 (Claude API client).
+M2 complete: `ClaudeClient` (RestClient, JDK request factory, retry policy with injectable sleeper and jitter), `ClaudeProperties`, typed Claude exceptions, `AdCopyRules`, `PromptBuilder`, `AdCopyParser`, and a live smoke test that `verify` excludes. `./mvnw verify` passes (157 tests). The live smoke test hasn't been run against the real API yet: no key on this machine; the owner will run it. Next: M3 (validator and generation endpoint).
 
 ## Milestones
 
 - [x] M0: Skeleton, CI, docs scaffolding
 - [x] M1: Domain model and CRUD
-- [ ] M2: Claude API client
+- [x] M2: Claude API client
 - [ ] M3: Validator and generation endpoint
 - [ ] M4: Approval workflow and end-to-end test
 - [ ] M5: Packaging, API docs, README
@@ -59,6 +59,44 @@ M1 complete: Flyway V1 schema, entities for Brand, Location, Campaign and AdVari
 - ADRs 015 to 018 added. flow.md error mapping now lists the framework errors and the 400 `errors` shape.
 - Not done (out of M1 scope): update/delete endpoints, pagination, variant endpoints.
 
+### 2026-10-31: M2
+
+- Start checks: M1 marked complete. `./mvnw verify` green with 66 tests, after setting `JAVA_HOME` (see the mistakes log).
+- Checked against the live docs (platform.claude.com: Messages, Errors, Rate limits, Models overview, Versions):
+  - Headers `x-api-key`, `anthropic-version`, `content-type`.
+  - Error body `{"type":"error","error":{"type","message"},"request_id"}` and the `request-id` response header; 529 is `overloaded_error`.
+  - `retry-after` is in seconds and missing on some 429s (the spend-cap 429 never has it).
+  - `claude-haiku-5-5` is a valid API ID and alias, with adaptive thinking on by default at effort `medium`.
+  - `2026-10-21` is the newest API version.
+- Spike in a scratchpad copy before planning:
+  - `wiremock-standalone` 3.13.2 works with JUnit 6.0.3 through `WireMockExtension`.
+  - `JdkClientHttpRequestFactory` read timeout: `ResourceAccessException` caused by `java.net.http.HttpTimeoutException: Request cancelled`.
+  - Connection refused: `ResourceAccessException` caused by `ConnectException`.
+  - `exchange()` exposes the status, headers and body for a 529.
+- Owner decisions:
+  - API version `2026-10-21`.
+  - Adopt the four retry gaps (connection errors, `retry-after` on any retryable response, every 5xx, invalid 200 envelope). The envelope vs. model-output boundary: garbage text in a valid envelope is one request.
+  - flow.md changes go in the retry commit itself.
+  - The live test logs latency, tokens, stop reason and thinking blocks, and the request has no thinking/effort fields.
+  - OK to dry-run `-Plive` with an empty key.
+- Commits, each with `verify` green:
+  1. Properties and client skeleton (80 tests)
+  2. Retry policy, plus the flow.md retry table (109)
+  3. `AdCopyRules` and `PromptBuilder` (130)
+  4. `AdCopyParser` (157)
+  5. Live smoke test (157; it's excluded)
+  6. These docs
+- Live test checks:
+  - `verify` after commit 5 ran 19 suites, 157 tests, and produced no `ClaudeLiveSmokeTests` report.
+  - `.\mvnw.cmd test -Plive "-Dfranchiseads.claude.api-key=" "-Dfranchiseads.claude.base-url=http://localhost:9"`, with no `ANTHROPIC_API_KEY` in the environment and no `.env`, ran exactly 1 suite and 1 test. It failed with "API key not configured: set ANTHROPIC_API_KEY …" before any HTTP call.
+- The only real waiting in the suite is the read-timeout tests (100 ms timeouts against a 1 s WireMock delay, 4 timeouts in total). All backoff delays go through `RecordingSleeper`; the tests assert exact durations, e.g. `[500ms, 1s]`, `[3s]`, the 10 s cap, and `[562ms, 1125ms]` with jitter 0.5.
+- ADRs 019 to 025 added. plan.md M2 now names the API version and the WireMock artifact. flow.md: retry table, the envelope rule, and parse step 4 (stop reasons). CLAUDE.md: structure, stack, and the `-Plive` command.
+- Small decisions inside the approved plan:
+  - `ClaudeProperties.maxAttempts` is capped at 10 (`@Max`) so the backoff shift can't overflow.
+  - `ClaudeResponse` has a `thinkingBlocks` count, for the live test output and the per-call log line.
+  - The parser accepts empty arrays and blank entries; the M3 validator reports them as `WRONG_COUNT`/`BLANK`, which gives the model better feedback than "malformed".
+- Not done (M3 scope): mapping the Claude exceptions and `MalformedAdCopyException` to 502/503/504 in `GlobalExceptionHandler`; `PromptBuilder` and `AdCopyParser` as Spring beans; building `AdBrief` from entities.
+
 ## Agent Mistakes Log
 
 | Date | What the agent got wrong | How it was caught | Fix |
@@ -70,3 +108,6 @@ M1 complete: Flyway V1 schema, entities for Brand, Location, Campaign and AdVari
 | 2026-10-31 | Committed the README roadmap chore (`6d5de39`) without running `verify` first, which breaks the "verify before every commit" rule. The change was docs-only and the code was identical to the last green tree | Own re-check while writing the M1 session log | The next commit (`b9576e2`) ran a full green `verify` on a tree that includes it. From now on: run `verify` before every commit, docs-only included |
 | 2026-10-31 | In the spike, imported `TestcontainersConfiguration` from a sub-package, assuming it was accessible. Initializr generates it package-private | Compiler: `TestcontainersConfiguration is not public in com.franchiseads` | Made it `public` (in the spike, then in the V1 commit) so feature-package tests can `@Import` it |
 | 2026-10-31 | Wrote "ADR-014" in the V1 migration comment for the unique-index ADR, but ADR-014 already exists (`.env` loading) | Own re-check before running anything | Changed the reference to ADR-015 before the commit |
+| 2026-10-31 | Ran `mvnw verify` at the start of M2 in a shell where `JAVA_HOME` was empty, even though CLAUDE.md warns that a shell started before it was set won't see it | The wrapper failed: "The JAVA_HOME environment variable is not defined correctly" | Read the value from the user environment (`[Environment]::GetEnvironmentVariable('JAVA_HOME','User')`) and set it in every Maven command. CLAUDE.md now gives that one-liner |
+| 2026-10-31 | Added the retry loop to `ClaudeClient` using `Pattern`, `DoubleSupplier` and a result record before writing the imports or the record. Also named the record `RetryableFailure`, though it also carries the success case. Later used `AdCopyParser` in `ClaudeClientTests` without importing it | IDE diagnostics right after each edit ("cannot be resolved to a type"), before any build | Added the imports, defined the record as `AttemptResult` with `success`/`timeout`/`unavailable` factories, and added the test imports |
+| 2026-10-31 | Wrote a `@CsvSource` row in `AdCopyParserTests` containing `can't`. `'` is `@CsvSource`'s quote character, so the row would have been misparsed | Own re-read of the test before running it | Reworded the row to `I cannot help with that.` |

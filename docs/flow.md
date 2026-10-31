@@ -45,7 +45,7 @@ sequenceDiagram
 1. **Load** campaign, location, and brand in a read-only transaction. Missing campaign or location → 404. Location belongs to a different brand than the campaign → 422.
 2. **Prompt.** System prompt: brand voice guidelines, banned words, exact output counts, character limits, the no-exclamation rule for headlines, and "respond with JSON only". User prompt: location name, city, region, local offer, campaign theme.
 3. **Call Claude** outside any transaction. Retries per the policy below happen inside `ClaudeClient` and don't count as regeneration attempts.
-4. **Parse** into `AdCopy(headlines, descriptions)`. Strip markdown fences, trim entries. Anything else unparseable is malformed.
+4. **Parse** into `AdCopy(headlines, descriptions)`. Strip one markdown fence around the JSON, trim entries, ignore extra keys. Anything else is malformed: surrounding prose, missing or null keys, non-arrays, non-string items, and any stop reason other than `end_turn` (`max_tokens` means the JSON was probably cut off). Counts and blank entries are left to the validator.
 5. **Validate** with `AdCopyValidator`.
 6. **Regenerate at most once** if step 4 or 5 failed. The second prompt includes the previous output and either the violation list or "your previous response was not valid JSON".
 7. **Save** in its own transaction:
@@ -151,7 +151,7 @@ All errors are `ProblemDetail` (RFC 9457). Internal details and stack traces are
 | Illegal status transition, or submitting a flagged variant | 409 |
 | Concurrent modification (`@Version`) | 409 |
 | Model output malformed on both attempts | 502 |
-| Claude rejected our request (non-retryable 4xx, e.g. bad key) | 502, logged at ERROR |
+| Claude rejected our request (non-retryable 4xx, e.g. bad key), or no API key is configured | 502, logged at ERROR |
 | Claude 429 or 5xx after all retries | 503 |
 | Claude timed out after all retries | 504 |
 | Anything unexpected, including an unmapped database integrity violation | 500, generic message, logged at ERROR |

@@ -64,7 +64,7 @@ It logs the model, latency, stop reason, input/output tokens, and whether any th
 
 - [x] M0: Skeleton, CI, docs scaffolding
 - [x] M1: Domain model and CRUD
-- [ ] M2: Claude API client
+- [x] M2: Claude API client
 - [ ] M3: Validator and generation endpoint
 - [ ] M4: Approval workflow and end-to-end test
 - [ ] M5: Packaging, API docs, README

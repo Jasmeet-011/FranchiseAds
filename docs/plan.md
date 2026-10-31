@@ -44,18 +44,18 @@ Spring Boot 4.1 project from Initializr, docker-compose Postgres, Testcontainers
 
 ---
 
-## M2: Claude API client
+## M2: Claude API client (done)
 
 **Goal:** a reliable, fully tested client for the Claude Messages API.
 
 **Scope**
 - `ClaudeProperties` (`@ConfigurationProperties`): base URL (default `https://api.anthropic.com`), API key (`ANTHROPIC_API_KEY`), model (`ANTHROPIC_MODEL`, default `claude-haiku-5-5`), max tokens, connect timeout, read timeout, max attempts.
-- `ClaudeClient` on Spring's `RestClient`: `POST /v1/messages` with `x-api-key` and `anthropic-version: 2023-06-01`. Returns the text content.
+- `ClaudeClient` on Spring's `RestClient`: `POST /v1/messages` with `x-api-key` and `anthropic-version: 2026-10-21` (ADR-025). Returns the text content.
 - Retry policy from `flow.md`: up to 3 attempts, exponential backoff with jitter, honors `retry-after` (capped), retries 429, 5xx, and timeouts only. Hand-written, with an injectable sleeper.
 - Typed failures: `ClaudeUnavailableException`, `ClaudeTimeoutException`, `ClaudeRequestException` (non-retryable 4xx).
 - `PromptBuilder`: system and user prompts from brand, location, and campaign. Asks for JSON only. Has a regeneration variant that includes the previous output and its violations.
 - `AdCopyParser`: model text → `AdCopy(headlines, descriptions)`. Tolerates markdown fences, trims entries, rejects anything else with `MalformedAdCopyException`.
-- Add WireMock (ask before adding; confirm a Boot 4 compatible artifact).
+- Add WireMock (ask before adding; confirm a Boot 4 compatible artifact). Chosen: `org.wiremock:wiremock-standalone` 3.13.2, test scope (ADR-019).
 
 **Tests**
 - WireMock: 200 valid, 200 with malformed body, 429 then 200, 429 with `retry-after`, 500 three times (gives up), 529 then 200, 400 (no retry, single request), 401 (no retry), read timeout.
