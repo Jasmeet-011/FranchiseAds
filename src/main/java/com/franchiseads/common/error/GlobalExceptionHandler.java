@@ -20,6 +20,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -80,6 +81,17 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 		problem.setProperty("currentStatus", ex.getCurrentStatus());
 		problem.setProperty("attemptedAction", ex.getAttemptedAction());
 		return problem;
+	}
+
+	/**
+	 * Another request changed the row between this request's read and its write: the {@code @Version} check failed
+	 * and nothing was written (ADR-033). Only {@code AdVariant} is versioned.
+	 */
+	@ExceptionHandler(ObjectOptimisticLockingFailureException.class)
+	ProblemDetail handleOptimisticLockingFailure(ObjectOptimisticLockingFailureException ex) {
+		log.info("Concurrent modification of {} {}", ex.getPersistentClassName(), ex.getIdentifier());
+		return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT,
+				"The variant was modified concurrently. Reload it and retry.");
 	}
 
 	/** Reaches here only when no attempt produced parseable copy (ADR-030). */

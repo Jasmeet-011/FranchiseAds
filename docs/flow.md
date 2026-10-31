@@ -139,7 +139,7 @@ stateDiagram-v2
 - `submit` and `approve` take no body. `reject` requires `{ "reason": "..." }`: the reason is stripped of surrounding whitespace, then must be non-blank and at most 500 characters (the `rejection_reason` column), otherwise 400 with a field error for `reason`. A missing body is 400. The stripped reason is stored as `rejectionReason`.
 - The rules live in one place, `VariantStatus.next` (ADR-032). **Anything outside the table is 409**, including repeating an action (approving an `APPROVED` variant): actions aren't idempotent. The status is checked before the validation flag.
 - `APPROVED` and `REJECTED` are final; a rejected location gets a fresh variant by generating again.
-- `AdVariant` carries a `@Version`, so concurrent approve and reject resolve to one winner and one 409.
+- `AdVariant` carries a `@Version` that every action's update checks (ADR-033). If two requests read the same variant before either commits (say an approve and a reject on a `PENDING_REVIEW` variant), the first to commit wins and the other gets 409 `The variant was modified concurrently. Reload it and retry.` with nothing written. A request that starts after the other has committed reads the new status and gets the state machine's 409 instead.
 
 Every refused action is a 409 `ProblemDetail` naming the current status and the attempted action (standard `type` and `title` fields omitted here):
 
@@ -194,7 +194,7 @@ All errors are `ProblemDetail` (RFC 9457). Internal details and stack traces are
 | Location doesn't belong to the campaign's brand | 422, detail names the location and campaign |
 | Duplicate brand name, ignoring case (`uq_brand_name_lower`) | 409 |
 | Illegal status transition, repeating an action, or submitting a flagged variant | 409, with `currentStatus` and `attemptedAction` (see Approval flow) |
-| Concurrent modification (`@Version`) | 409 |
+| Concurrent modification (`@Version`) | 409, `The variant was modified concurrently. Reload it and retry.` |
 | Model output malformed on both attempts (no call produced parseable copy) | 502 |
 | Claude rejected our request (non-retryable 4xx, e.g. bad key), or no API key is configured, and no call produced parseable copy | 502, logged at ERROR |
 | Claude 429 or 5xx after all retries, and no call produced parseable copy | 503 |

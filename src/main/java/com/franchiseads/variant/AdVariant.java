@@ -27,7 +27,8 @@ import org.hibernate.type.SqlTypes;
 /**
  * One generated set of headlines and descriptions for a campaign at a location. The copy never changes after
  * generation; only the review status (and the rejection reason) does, through {@link #submit}, {@link #approve} and
- * {@link #reject}.
+ * {@link #reject}. {@code version} makes a concurrent update fail with a 409 instead of overwriting another
+ * request's change (ADR-033).
  */
 @Entity
 @Table(name = "ad_variant")

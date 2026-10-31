@@ -14,6 +14,7 @@ import com.franchiseads.claude.ClaudeTimeoutException;
 import com.franchiseads.claude.ClaudeUnavailableException;
 import com.franchiseads.generation.LocationBrandMismatchException;
 import com.franchiseads.generation.MalformedAdCopyException;
+import com.franchiseads.variant.AdVariant;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
@@ -29,6 +30,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.MediaType;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -180,6 +182,16 @@ class GlobalExceptionHandlerTests {
 			.andExpect(content().string(not(containsString("req_"))));
 	}
 
+	@Test
+	void optimisticLockingFailureIs409AskingTheClientToReloadAndRetry() throws Exception {
+		mvc.perform(get("/stub/stale"))
+			.andExpect(status().isConflict())
+			.andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+			.andExpect(jsonPath("$.status").value(409))
+			.andExpect(jsonPath("$.detail").value("The variant was modified concurrently. Reload it and retry."))
+			.andExpect(jsonPath("$.instance").value("/stub/stale"));
+	}
+
 	record StubRequest(@NotBlank String name, @Size(max = 3) List<@NotBlank String> tags) {
 	}
 
@@ -224,6 +236,11 @@ class GlobalExceptionHandlerTests {
 				case "timeout" -> new ClaudeTimeoutException(upstream, null);
 				default -> new IllegalArgumentException(kind);
 			};
+		}
+
+		@GetMapping("/stale")
+		String stale() {
+			throw new ObjectOptimisticLockingFailureException(AdVariant.class, 7L);
 		}
 
 		@GetMapping("/boom")
