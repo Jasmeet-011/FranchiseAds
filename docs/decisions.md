@@ -264,3 +264,27 @@ Spring 7.0.10's `JdkClientHttpRequestFactory` only has a factory-level `setReadT
   - `docker compose config` shows the key from `.env` (length only), the shell override winning, and an empty key with an empty `--env-file`.
   - Inside the container the key had the same 106 characters, and none of the app's log lines contained it.
   - The app connected to `jdbc:postgresql://postgres:5432/franchiseads`, and `/actuator/health` from the host returned `UP`.
+
+## ADR-036: springdoc-openapi 3.1.1; per-endpoint ProblemDetail responses; docs switchable
+
+**Context:** M5 asks for an OpenAPI document and Swagger UI listing every endpoint with its success response and its `ProblemDetail` errors as in flow.md, switchable by a property because M6 decides whether they're public. springdoc isn't managed by Boot.
+**Decision:**
+- **Version 3.1.1** (`springdoc-openapi-starter-webmvc-ui`).
+  - springdoc's compatibility table maps Boot 4.1.x to 3.1.x–3.2.x. 3.1.1's parent is Boot 4.1.0, and it resolves cleanly against our 4.1.2.
+  - It has the 3.1.1 security fixes, including swagger-ui 5.32.14 for the DOMPurify XSS (CVE-2026-75838).
+  - 3.2.0 (built on Boot 4.1.2, the version springdoc's page recommends) was released on 2026-10-24, a week before M5. The owner doesn't adopt dependency releases younger than about two weeks, and 3.2.0's changes (MCP, Scalar, nullable markers, Gradle Jackson pinning) don't matter here.
+  - It brings Jackson 2 (`jackson-databind` 2.21.7, the Boot-managed version) in through swagger-core, next to the app's Jackson 3. Every existing test that asserts JSON responses (timestamps, problem details) passes unchanged with it on the classpath.
+- **Switch:** `springdoc.api-docs.enabled` and `springdoc.swagger-ui.enabled` both read `API_DOCS_ENABLED` (default `true`). Off, `/v3/api-docs`, `/swagger-ui.html` and `/swagger-ui/index.html` answer the usual 404 `ProblemDetail`.
+- **Error responses, declared per endpoint.** `@ProblemResponses({HttpStatus.BAD_REQUEST, HttpStatus.NOT_FOUND, ...})` on each handler method. An `OperationCustomizer` (`OpenApiConfiguration`) turns each status into a `$ref` to one shared response per status (`Problem400` … `Problem504`). Each has a description worded after flow.md's error table and `application/problem+json` content with one `ProblemDetail` schema, which documents the `errors`, `currentStatus` and `attemptedAction` extensions. A status without a shared definition fails startup.
+  - Each controller method gets `@Operation(summary)`, `@ProblemResponses`, and `@ApiResponse(responseCode = "201", useReturnTypeSchema = true)` on the four creates. One `@Tag` per controller.
+  - Rejected: a global error list on every operation, which would contradict flow.md (`GET /brands` can't return 422). Also rejected: a path→errors table inside the configuration, which separates the docs from the endpoints they describe.
+- **`springdoc.override-with-generic-response: false`.** With it on, springdoc copies every `@ExceptionHandler` that declares a `@ResponseStatus` onto every operation. Today none does: our handlers return `ProblemDetail`, so the setting changes nothing, and the M5 plan was wrong to say the default would put 502/503/504 on `GET /brands`. It's kept as a guard. With the setting on and `@ResponseStatus(NOT_FOUND)` added to the 404 handler, `GET /brands` gained a 404 and two tests failed; with it off, the same change passed.
+- 500 isn't documented per endpoint; any endpoint can return it, with a generic detail.
+
+**Consequences:** `OpenApiDocumentationTests` reads the endpoints from Spring MVC's own `RequestMappingHandlerMapping` (controllers in `com.franchiseads`) and checks that:
+- the document has exactly those operations
+- each has a summary and exactly one success response (201 for the creates)
+- each lists exactly the error statuses in the test's table taken from flow.md, which a new endpoint must be added to
+- every error response points at the shared definitions
+
+Each check was shown to fail on a deliberate break: an endpoint hidden with `@Hidden`, a summary removed, 504 dropped from generate, the 201 declaration removed (springdoc then documents 200), and the generic-response case above. `ApiDocsDisabledTests` failed (200/302/200) with the switch hard-coded on. The test table and `@ProblemResponses` have to be kept in step with flow.md by hand.

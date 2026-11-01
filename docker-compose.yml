@@ -35,6 +35,7 @@ services:
       # Defaults repeat application.yml's: an empty ANTHROPIC_MODEL would fail startup instead of falling back.
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-haiku-5-5}
       ANTHROPIC_EFFORT: ${ANTHROPIC_EFFORT:-low}
+      API_DOCS_ENABLED: ${API_DOCS_ENABLED:-true}
     ports:
       - "8080:8080"
 
