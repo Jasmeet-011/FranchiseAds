@@ -203,6 +203,15 @@ Integration tests truncate every table before each test (`TruncateTablesExtensio
 
 Each check is recorded in [docs/progress.md](docs/progress.md) and the ADRs.
 
+**Image secret check.** [scripts/check-image-secrets.sh](scripts/check-image-secrets.sh) proves a built image contains no `.env` file and no API key. Run it with bash (Linux, macOS, or Git Bash on Windows) after building:
+
+```bash
+docker build -t franchiseads:local .
+bash scripts/check-image-secrets.sh              # optional args: [image] [env-file], default franchiseads:local .env
+```
+
+It searches the image's files, the contents of every jar, the image config and the build history for the key in your `.env`, for `ANTHROPIC_API_KEY=` and for `sk-ant-`. It prints counts only, never the key. Control searches must find known strings, so a search that can't find anything can't pass silently. It exits with 1 on any hit.
+
 ## Design decisions
 
 The full list, with the alternatives considered, is in [docs/decisions.md](docs/decisions.md). The most important:

@@ -25,7 +25,7 @@ Short ADRs. Each has context, the decision, and its consequences. Newest at the 
 ## ADR-004: GitHub Actions CI, Windows-safe repo settings
 
 **Context:** Development happens on Windows; CI runs on Linux.
-**Decision:** CI runs `./mvnw -B verify` on Temurin 21 with a Maven cache, on every push and pull request to main. `.gitattributes` forces LF for `mvnw` (and CRLF for `*.cmd`), and `mvnw` is committed as executable (100755). There are no other shell scripts yet; add an LF rule for them when there are.
+**Decision:** CI runs `./mvnw -B verify` on Temurin 21 with a Maven cache, on every push and pull request to main. `.gitattributes` forces LF for `mvnw` (and CRLF for `*.cmd`), and `mvnw` is committed as executable (100755). There are no other shell scripts yet; add an LF rule for them when there are. *M5 note:* `scripts/check-image-secrets.sh` is the first, so `.gitattributes` now has `*.sh text eol=lf`, and the script is committed as executable.
 **Consequences:** Without these, CI fails on CRLF line endings or "Permission denied" before any test runs.
 
 ## ADR-005: Package by feature
