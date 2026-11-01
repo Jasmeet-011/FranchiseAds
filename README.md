@@ -233,7 +233,7 @@ Output tokens fell by 79%, and the copy was valid in both runs. These are single
 This project is built with Claude Code as the coding agent. Claude Code wrote most of the code, tests and docs. I set the scope of each milestone, reviewed every plan before any code was written, chose between the options it proposed, and changed plans where they were wrong or incomplete. Every design decision is recorded as an ADR. A few places where I changed the plan:
 
 - **Don't discard paid work.** The plan threw away a valid first attempt whenever the regeneration call failed. I replaced the case-by-case rules with one principle: if any attempt produced parseable copy, save the last one, flagged if it has violations (ADR-030).
-- **Measure before tuning.** I had the live smoke test report thinking tokens, saw they were about 80% of output, and set effort to low instead of disabling thinking, which would break on other models: roughly half the latency and 79% fewer output tokens (ADR-026).
+- **Measure before tuning.** I had the live smoke test report token usage and thinking blocks, saw that about 80% of the output was likely thinking, and set effort to low instead of disabling thinking, which would break on other models: roughly half the latency and 79% fewer output tokens (ADR-026).
 - **A hard latency bound.** I chose a 20s read timeout plus a 50s per-request deadline over just lowering timeouts, and required that hitting the deadline after a usable first attempt saves it instead of returning 504 (ADR-027, ADR-030).
 - **Dependency age.** I picked springdoc 3.1.1 over a 3.2.0 released a week earlier (ADR-036).
 
