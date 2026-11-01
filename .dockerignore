@@ -1,0 +1,12 @@
+# Allowlist (ADR-034): ignore everything, then re-include only what the image build needs.
+# Everything else stays out of the build context, in particular .env (local secrets), .git, target/,
+# IDE folders (.idea/, .vscode/), src/test/ and docs/. A new file can't reach the image unless it's added here.
+*
+!mvnw
+!.mvn/
+!pom.xml
+!src/main/
+
+# Never send a local env file, even if one ends up under src/main.
+**/.env
+**/.env.*
