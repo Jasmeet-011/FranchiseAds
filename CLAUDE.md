@@ -132,6 +132,7 @@ com.franchiseads
 
 - Controllers are thin: validate input, call one service method, map to a DTO. No business logic, no repository access.
 - DTOs are Java records in each feature's `dto` package. Never return a JPA entity from a controller.
+- Every new endpoint gets `@Operation(summary = ...)`, `@ProblemResponses({...})` with its error statuses from `docs/flow.md`, and a row in `OpenApiDocumentationTests.EXPECTED_ERRORS` (ADR-036). A create also gets `@ApiResponse(responseCode = "201", useReturnTypeSchema = true)`.
 - Manual mapping with static `from(...)` methods. No MapStruct, no Lombok.
 - Constructor injection only. No field `@Autowired`.
 - IDs are `Long` with IDENTITY. Timestamps are `Instant` mapped to `timestamptz`.
