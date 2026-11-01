@@ -110,6 +110,7 @@ src/test/java/com/franchiseads/
               deterministic via @MockitoSpyBean on the repository)
   common/openapi/ OpenApiDocumentationTests (every mapped endpoint documented, errors per flow.md), ApiDocsDisabledTests
 Dockerfile, .dockerignore (allowlist), docker-compose.yml, .env.example, .github/workflows/ci.yml (verify + image build), docs/
+scripts/check-image-secrets.sh             proves a built image has no .env and no API key; counts only, exit 1 on a hit
 ```
 
 Tests that write through a full Spring context declare `@ExtendWith(TruncateTablesExtension.class)`: every application table (not `flyway_schema_history`) is truncated with `RESTART IDENTITY CASCADE` before each test (ADR-031), so no test sees another's rows and IDs start at 1. `@DataJpaTest` classes roll back instead and don't need it.

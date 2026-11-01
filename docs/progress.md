@@ -239,6 +239,20 @@ M5 complete: a multi-stage Docker image, the app in docker-compose under the `ap
   - `actionlint` was used to validate the workflow.
   - The first clean-clone run used alternate host ports. It was rerun on 8080, as written, once the port was free.
   - Everything else as planned.
+- **Follow-ups after the M5 docs commit**, at the owner's request, each with `verify` green (344 tests):
+  1. `01ef0d3`: the README's effort bullet now says the smoke test reported token usage and thinking blocks, and that about 80% of the output was *likely* thinking. The before-run never logged thinking tokens; the share was estimated (ADR-026).
+  2. `1203e5f`: the image secret check is kept as `scripts/check-image-secrets.sh`.
+     - Changes from the session script:
+       - default arguments
+       - a `.env` without a key runs only the pattern searches
+       - a PASS/FAIL verdict, with exit 1 on any hit or on a control that finds nothing
+       - the per-entry listing, which never printed, is removed
+     - Against `franchiseads:local` (now 96 jars and 6081 entries, springdoc included) with the real `.env`: PASS.
+     - Against a throwaway probe image with a planted fake key (`sk-ant-fake…`): FAIL, exit 1, on the `.env` file, the key, both patterns and the history line. The probe image was removed.
+     - The README mentions it under Testing. `.gitattributes` gets `*.sh text eol=lf`, as ADR-004 required for the first shell script, with a dated note in ADR-004. The script is committed as `100755`.
+  3. `2f2a56b`: CLAUDE.md conventions say every new endpoint gets `@Operation(summary)`, `@ProblemResponses` and a row in `OpenApiDocumentationTests.EXPECTED_ERRORS`, and a create also gets the 201 `@ApiResponse`.
+
+  This entry and `scripts/` in the CLAUDE.md structure land in one docs commit.
 - **Not done (out of M5 scope):** AWS deployment, publishing the image, a CDS/AOT cache. A HEALTHCHECK in the image wasn't needed for compose; M6's load balancer will check `/actuator/health`.
 
 ## Agent Mistakes Log
