@@ -2,7 +2,9 @@
 
 ## Current Status
 
-M5 complete: a multi-stage Docker image, the app in docker-compose under the `app` profile, springdoc-openapi 3.1.1 with Swagger UI and a test that every mapped endpoint is documented, a CI job that builds the image, and a rewritten README checked from a clean clone. `./mvnw verify` passes: 34 suites, 344 tests. No real API calls were made in M5. Next: M6 (AWS deployment), when the owner says so.
+M5 complete: a multi-stage Docker image, the app in docker-compose under the `app` profile, springdoc-openapi 3.1.1 with Swagger UI and a test that every mapped endpoint is documented, a CI job that builds the image, and a rewritten README checked from a clean clone. No real API calls were made in M5.
+
+In progress outside the milestones: a local review console (a separate repo, built with Lovable; plan.md "UI"). This repo's part, CORS for `http://localhost:5173` and `http://127.0.0.1:5173` (ADR-037), is done. `./mvnw verify` passes: 36 suites, 358 tests. Next: M6 (AWS deployment), when the owner says so.
 
 ## Milestones
 
@@ -13,6 +15,7 @@ M5 complete: a multi-stage Docker image, the app in docker-compose under the `ap
 - [x] M4: Approval workflow and end-to-end test
 - [x] M5: Packaging, API docs, README
 - [ ] M6: AWS deployment
+- [ ] UI: local review console (separate repo, Lovable; in progress). This repo's CORS part is done
 
 ## Session Log
 
@@ -255,6 +258,31 @@ M5 complete: a multi-stage Docker image, the app in docker-compose under the `ap
   This entry and `scripts/` in the CLAUDE.md structure land in one docs commit.
 - **Not done (out of M5 scope):** AWS deployment, publishing the image, a CDS/AOT cache. A HEALTHCHECK in the image wasn't needed for compose; M6's load balancer will check `/actuator/health`.
 
+### 2026-10-31: CORS for the local review console
+
+- **Start checks:** progress.md had M5 complete on a clean tree at `5dd075a`. Docs read before planning: CLAUDE.md, progress.md, plan.md (M5, M6), decisions.md, the flow.md error mapping, README configuration.
+- **Read-only research:** in spring-webmvc/spring-web 7.0.10, `CorsRegistration` has `allowedOrigins`, `allowedMethods`, `allowedHeaders`, `exposedHeaders`, `allowCredentials` and `maxAge`. `DefaultCorsProcessor` skips when no CORS configuration applies.
+- **Owner decisions:** the plan was approved, including the CLAUDE.md structure edits, with one change: the default is both `http://localhost:5173` and `http://127.0.0.1:5173`, which browsers treat as different origins.
+- **Commits, each with `verify` green:**
+  1. `304ea7d` `feat: CORS for a local frontend` (358 tests, 36 suites): `CorsProperties`, `WebCorsConfiguration`, `application.yml`, compose, `.env.example`, `CorsConfigurationTests` and `CorsPropertiesTests`, the README row, the flow.md 403 row, ADR-037
+  2. This docs commit: the plan.md UI section, this entry, CLAUDE.md structure
+- **Tests:**
+  - `CorsConfigurationTests` (10): `@WebMvcTest` with a stub controller, origins set in the test. It covers allowed preflights from both configured origins, another origin's preflight (403), another origin's GET (403, plain `Invalid CORS request`, controller not called), a `DELETE` preflight (403), an `authorization`-only preflight (403), a mixed-header preflight (200, only `content-type` allowed), `Location` exposed on a 201, CORS headers on a 400 `ProblemDetail`, and no headers without `Origin`.
+  - `CorsPropertiesTests` (4): the default, trimmed comma-separated values, empty stops startup, a blank entry stops startup.
+  - A stub controller instead of `BrandController`, which is package-private, as in `GlobalExceptionHandlerTests`.
+- **Counterfactual:** `addCorsMappings` emptied (the file backed up in the session scratchpad first). 9 of 10 `CorsConfigurationTests` failed:
+  - the five other-origin, disallowed-method and disallowed-header cases got 200 instead of 403
+  - the four allowed-origin cases had no `Access-Control-Allow-*`/`Expose-Headers` headers
+  - `requestWithoutOriginGetsNoCorsHeaders`, the control, passed
+
+  The file was restored from the backup. Then the full `verify` ran.
+- **Compose:** `docker compose --profile app config` (grepping only the CORS line) resolves the default, and a shell `CORS_ALLOWED_ORIGINS=http://x.test` wins. The owner's `.env` doesn't set it.
+- **Deviations from the approved plan:**
+  - The plan said an empty `CORS_ALLOWED_ORIGINS` falls back to the default. It doesn't: a list binds to empty and `@NotEmpty` stops startup. That's kept, as fail-fast with the property named, and `emptyValueStopsStartup` pins it. See the mistakes log.
+  - The plan's "disallowed header → 403" test became two tests: `authorization` alone gets 403; `content-type, authorization` gets 200 with only `content-type` allowed. See the mistakes log.
+  - A stub controller instead of `BrandController`.
+- **Not done:** no manual `curl` check against a running app (the plan listed it as optional), no README roadmap line for the UI, nothing in the UI repo.
+
 ## Agent Mistakes Log
 
 | Date | What the agent got wrong | How it was caught | Fix |
@@ -288,3 +316,7 @@ M5 complete: a multi-stage Docker image, the app in docker-compose under the `ap
 | 2026-10-31 | M5: left a dead `for` loop with a placeholder comment in `OpenApiDocumentationTests` | IDE diagnostics ("value of the local variable code is not used") right after writing the file | Removed the loop before running the tests |
 | 2026-10-31 | M5: the first draft of ADR-036 said Spring MVC "still serializes with Jackson 3" with Jackson 2 on the classpath. Nothing had checked which converter is used; only the existing JSON tests had passed | Own re-read of the ADR before committing | Reworded to what was shown: every existing JSON-asserting test passes unchanged |
 | 2026-10-31 | Ran the `@Version` regression check by just deleting the annotation. The `version` field then stayed null, the insert in the test setup hit the not-null column, and both tests errored before reaching the stale write. That proved nothing about the lock | Both tests failed with errors (not failures), the control test included. The cause was `null value in column "version" ... violates not-null constraint` | Reran with the annotation removed and the field initialized to `0L`, after moving the version precondition out of `@BeforeEach`. The stale reject then returned 200 instead of 409, which is the counterfactual the test is meant to catch |
+| 2026-10-31 | CORS: the plan said an empty `CORS_ALLOWED_ORIGINS` would fall back to the default, generalizing from `ANTHROPIC_EFFORT` (a scalar) to a `List` without checking | `CorsPropertiesTests.emptyValueFallsBackToTheDefault` failed: an empty value binds to an empty list, and `@NotEmpty` stopped startup | Kept the fail-fast behavior; the test is now `emptyValueStopsStartup` and asserts the message names the property. ADR-037 and the README say "set but empty, startup fails". Reported to the owner as a deviation from the approved plan |
+| 2026-10-31 | CORS: the plan said a preflight asking for `content-type, authorization` is rejected with 403. Spring allows the listed subset and answers 200; only a preflight with no allowed header gets 403 | `preflightForDisallowedHeaderIsRejected` failed: expected 403, got 200 | Split into `preflightForOnlyDisallowedHeaderIsRejected` (403) and `preflightAllowsOnlyTheListedHeader` (200, `Allow-Headers: content-type`). ADR-037 and flow.md say the browser blocks the partly allowed request |
+| 2026-10-31 | CORS: wrote `CorsConfigurationTests` against `BrandController` from `common.config`, though controllers are package-private | IDE diagnostics right after writing the file ("not visible"), before any build | Rewrote it with a nested stub controller, the pattern of `GlobalExceptionHandlerTests` |
+| 2026-10-31 | CORS: backed up `WebCorsConfiguration.java` for the counterfactual with `cp … "$TMP/…"`, the system temp folder, not the session scratchpad | Own check of the `ls` output after the copy | Moved the backup into the scratchpad, confirmed it identical to the file with `diff`, and restored from there |

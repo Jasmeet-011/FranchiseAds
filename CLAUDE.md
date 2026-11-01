@@ -89,7 +89,8 @@ src/main/java/com/franchiseads/
               classes), GenerationInputs, LocationBrandMismatchException, dto/GenerateRequest,
               AdBrief, Prompt, PromptBuilder, AdCopy, AdCopyParser, MalformedAdCopyException (pure)
   validation/ AdCopyValidator, Violation (pure), AdCopyRules (+ AdCopyRulesConfiguration)
-  common/     Strings (input normalization), config/ClockConfiguration, error/ (GlobalExceptionHandler,
+  common/     Strings (input normalization), config/ (ClockConfiguration, CorsProperties + WebCorsConfiguration:
+              CORS for a local UI, ADR-037), error/ (GlobalExceptionHandler,
               ResourceNotFoundException), openapi/ (OpenApiConfiguration, @ProblemResponses: per-endpoint
               ProblemDetail responses as shared $refs)
 src/main/resources/application.yml         all config, env vars with local defaults
@@ -109,6 +110,7 @@ src/test/java/com/franchiseads/
   variant/    VariantStatusTests, AdVariantTests (plain JUnit), VariantOptimisticLockingTests (@Version over HTTP,
               deterministic via @MockitoSpyBean on the repository)
   common/openapi/ OpenApiDocumentationTests (every mapped endpoint documented, errors per flow.md), ApiDocsDisabledTests
+  common/config/  CorsConfigurationTests (@WebMvcTest, stub controller), CorsPropertiesTests (binding only)
 Dockerfile, .dockerignore (allowlist), docker-compose.yml, .env.example, .github/workflows/ci.yml (verify + image build), docs/
 scripts/check-image-secrets.sh             proves a built image has no .env and no API key; counts only, exit 1 on a hit
 ```

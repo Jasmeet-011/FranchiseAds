@@ -172,6 +172,26 @@ Met. The README was followed exactly as written in a fresh clone on Windows (CRL
 
 ---
 
+## UI: local review console (separate repo, Lovable) (in progress)
+
+**Goal:** a reviewer can work through the approval workflow in a browser instead of curl or Swagger UI.
+
+**Scope**
+- The UI lives in its own repo, built with Lovable, and runs locally on the Vite dev server (`http://localhost:5173`). This repo doesn't build, serve or test it.
+- This repo's only change: CORS for that origin (ADR-037). `CORS_ALLOWED_ORIGINS` defaults to `http://localhost:5173,http://127.0.0.1:5173`; `GET`, `POST`, `OPTIONS`; `Content-Type`; `Location` exposed; no credentials. Done.
+- The UI uses the API as it is: brands, locations, campaigns, generate, the variant list and the review actions. The contract is the OpenAPI document at `/v3/api-docs`.
+
+**Out of scope**
+- Auth, sessions or cookies (the API has none, so CORS sends no credentials).
+- Hosting the UI. A hosted UI's origin is an M6 question.
+- API changes for the UI's convenience. If the UI needs one, it gets proposed and planned first, like any other change.
+
+**Acceptance criteria**
+- With the API on 8080 and the UI on 5173, the UI can create a brand, location and campaign, generate a variant, submit it, and approve or reject it, and the browser console shows no CORS errors.
+- The UI shows `ProblemDetail` errors (400, 404, 409, 422, 502–504), and reads created resources' URLs from `Location`.
+
+---
+
 ## M6: AWS deployment
 
 **Goal:** a public URL running the service.
