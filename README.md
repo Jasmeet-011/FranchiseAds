@@ -266,6 +266,7 @@ The workflow:
 - [x] M4: Approval workflow and end-to-end test
 - [x] M5: Packaging, API docs, README
 - [ ] M6: AWS deployment (next)
+- [ ] UI: local review console in a separate repo, [FranchiseAds-Console](https://github.com/Jasmeet-011/FranchiseAds-Console) (React + TypeScript + Vite, built with Claude Code; in progress). This repo's part, CORS for `localhost:5173` ([ADR-037](docs/decisions.md#adr-037-cors-for-a-local-ui-through-webmvcconfigurer-exact-origins-from-cors_allowed_origins)), is done.
 
 ## Docs
 

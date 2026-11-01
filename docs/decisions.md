@@ -291,7 +291,7 @@ Each check was shown to fail on a deliberate break: an endpoint hidden with `@Hi
 
 ## ADR-037: CORS for a local UI through `WebMvcConfigurer`; exact origins from `CORS_ALLOWED_ORIGINS`
 
-**Context:** A local review console (a separate repo, built with Lovable, served by Vite on port 5173) calls the API from the browser. Without CORS headers the browser blocks every call. The API has no auth and no cookies.
+**Context:** A local review console calls the API from the browser. It's a separate repo, `FranchiseAds-Console`: React + TypeScript + Vite, built with Claude Code, served by the Vite dev server on port 5173. Without CORS headers the browser blocks every call. The API has no auth and no cookies.
 **Decision:**
 - `WebCorsConfiguration.addCorsMappings` registers `/**` for every Spring MVC endpoint, `/v3/api-docs` included:
   - origins: `franchiseads.cors.allowed-origins` (`CorsProperties`, env `CORS_ALLOWED_ORIGINS`, comma-separated)

@@ -4,7 +4,7 @@
 
 M5 complete: a multi-stage Docker image, the app in docker-compose under the `app` profile, springdoc-openapi 3.1.1 with Swagger UI and a test that every mapped endpoint is documented, a CI job that builds the image, and a rewritten README checked from a clean clone. No real API calls were made in M5.
 
-In progress outside the milestones: a local review console (a separate repo, built with Lovable; plan.md "UI"). This repo's part, CORS for `http://localhost:5173` and `http://127.0.0.1:5173` (ADR-037), is done. `./mvnw verify` passes: 36 suites, 358 tests. Next: M6 (AWS deployment), when the owner says so.
+In progress outside the milestones: a local review console, built with Claude Code in a separate repo ([FranchiseAds-Console](https://github.com/Jasmeet-011/FranchiseAds-Console): React + TypeScript + Vite; plan.md "UI"). This repo's part, CORS for `http://localhost:5173` and `http://127.0.0.1:5173` (ADR-037), is done. `./mvnw verify` passes: 36 suites, 358 tests. Next: M6 (AWS deployment), when the owner says so.
 
 ## Milestones
 
@@ -15,7 +15,7 @@ In progress outside the milestones: a local review console (a separate repo, bui
 - [x] M4: Approval workflow and end-to-end test
 - [x] M5: Packaging, API docs, README
 - [ ] M6: AWS deployment
-- [ ] UI: local review console (separate repo, Lovable; in progress). This repo's CORS part is done
+- [ ] UI: local review console (separate repo [FranchiseAds-Console](https://github.com/Jasmeet-011/FranchiseAds-Console), built with Claude Code; in progress). This repo's CORS part is done
 
 ## Session Log
 
@@ -281,7 +281,12 @@ In progress outside the milestones: a local review console (a separate repo, bui
   - The plan said an empty `CORS_ALLOWED_ORIGINS` falls back to the default. It doesn't: a list binds to empty and `@NotEmpty` stops startup. That's kept, as fail-fast with the property named, and `emptyValueStopsStartup` pins it. See the mistakes log.
   - The plan's "disallowed header → 403" test became two tests: `authorization` alone gets 403; `content-type, authorization` gets 200 with only `content-type` allowed. See the mistakes log.
   - A stub controller instead of `BrandController`.
-- **Not done:** no manual `curl` check against a running app (the plan listed it as optional), no README roadmap line for the UI, nothing in the UI repo.
+- **Not done:** no manual `curl` check against a running app (the plan listed it as optional), nothing in the UI repo.
+- **Follow-up, at the owner's request:**
+  - The UI is now built with Claude Code instead of the tool first named. Its repo is `FranchiseAds-Console`: React + TypeScript + Vite on 5173, with types generated from the OpenAPI document.
+  - plan.md, ADR-037's context and this file were reworded to match, and the README roadmap got a UI line linking to that repo.
+  - Behavior is unchanged; the CORS code and tests are as committed in `304ea7d`.
+  - The owner kept the empty-value startup failure, the mixed-header preflight behavior, and the plain-text 403.
 
 ## Agent Mistakes Log
 

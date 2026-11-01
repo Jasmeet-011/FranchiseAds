@@ -172,12 +172,13 @@ Met. The README was followed exactly as written in a fresh clone on Windows (CRL
 
 ---
 
-## UI: local review console (separate repo, Lovable) (in progress)
+## UI: local review console (separate repo, built with Claude Code) (in progress)
 
 **Goal:** a reviewer can work through the approval workflow in a browser instead of curl or Swagger UI.
 
 **Scope**
-- The UI lives in its own repo, built with Lovable, and runs locally on the Vite dev server (`http://localhost:5173`). This repo doesn't build, serve or test it.
+- The UI lives in its own repo, [FranchiseAds-Console](https://github.com/Jasmeet-011/FranchiseAds-Console) (locally `C:\dev\FranchiseAds-Console`), built with Claude Code. This repo doesn't build, serve or test it.
+- Stack: React + TypeScript + Vite, run locally on the Vite dev server (`http://localhost:5173`). The API types are generated from this API's OpenAPI document (`/v3/api-docs`, ADR-036), not written by hand.
 - This repo's only change: CORS for that origin (ADR-037). `CORS_ALLOWED_ORIGINS` defaults to `http://localhost:5173,http://127.0.0.1:5173`; `GET`, `POST`, `OPTIONS`; `Content-Type`; `Location` exposed; no credentials. Done.
 - The UI uses the API as it is: brands, locations, campaigns, generate, the variant list and the review actions. The contract is the OpenAPI document at `/v3/api-docs`.
 
