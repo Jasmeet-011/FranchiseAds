@@ -21,3 +21,12 @@ jobs:
 
       - name: Build and test
         run: ./mvnw -B verify
+
+  # Builds the image so a broken Dockerfile fails CI. Nothing is pushed. Tests run in the job above, not here (ADR-034).
+  docker-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the Docker image
+        run: docker build --progress=plain -t franchiseads:ci .
