@@ -135,20 +135,40 @@ Spring Boot 4.1 project from Initializr, docker-compose Postgres, Testcontainers
 
 ---
 
-## M5: Packaging, API docs, README
+## M5: Packaging, API docs, README (done)
 
 **Goal:** anyone can clone, run, and understand the project in five minutes.
 
 **Scope**
-- Multi-stage `Dockerfile`: build with Maven, run on a Temurin 21 JRE, non-root user.
-- docker-compose profile that runs app and Postgres together.
-- springdoc-openapi with Swagger UI (confirm the Boot 4 compatible version).
-- README complete: overview, architecture diagram, API table, run, test, design decisions summary, and a "Built with Claude Code" section drawn from the Agent Mistakes Log.
+- Multi-stage `Dockerfile` (ADR-034):
+  - build on `eclipse-temurin:21.0.13_9-jdk-noble` with the Maven wrapper, run on `…-jre-noble`
+  - Maven dependencies through a BuildKit cache mount
+  - Boot 4.1's `-Djarmode=tools extract --layers`
+  - tests skipped in the image build (CI runs them; Testcontainers can't run in `docker build`)
+  - non-root user `app`, port 8080, heap from the container limit via `JAVA_TOOL_OPTIONS`
+  - `.dockerignore` is an allowlist
+- docker-compose `app` service under the `app` profile (ADR-035): waits for a healthy Postgres, `DB_URL` fixed to the `postgres` service name, `ANTHROPIC_API_KEY` passed through from the shell or `.env` at `up` time. Plain `up -d` still starts only Postgres; teardown is `--profile app down`.
+- springdoc-openapi 3.1.1 with Swagger UI (ADR-036; 3.2.0 was too new to adopt):
+  - every endpoint has a summary, its success response, and its `ProblemDetail` errors from flow.md, via `@ProblemResponses` and one shared response per status
+  - `API_DOCS_ENABLED` (default `true`) switches the docs off
+- CI: a second job builds the Docker image (no push).
+- README rewritten: overview, Mermaid architecture and state diagrams, API table, three ways to run (PowerShell and Linux), configuration tables, testing strategy, design decisions, measured results, Built with Claude Code, roadmap.
+
+**Tests**
+- `OpenApiDocumentationTests`:
+  - the document has exactly the operations Spring MVC maps, read from `RequestMappingHandlerMapping`
+  - each has a summary and one success response (201 for creates) and lists exactly its flow.md error statuses
+  - all errors reference the shared definitions
+  - Swagger UI is served
+- `ApiDocsDisabledTests`: all three docs paths are 404 when switched off.
+- Each check was shown to fail on a deliberate break.
 
 **Acceptance criteria**
 - `docker build` and `docker compose --profile app up` work from a clean clone.
 - Swagger UI lists every endpoint with request and response schemas.
 - Following the README from scratch works on a clean machine.
+
+Met. The README was followed exactly as written in a fresh clone on Windows (CRLF checkout), on port 8080: full stack, host run, one test class and `verify`.
 
 ---
 

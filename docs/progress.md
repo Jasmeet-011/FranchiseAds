@@ -2,7 +2,7 @@
 
 ## Current Status
 
-M4 complete: test isolation by truncation, the `VariantStatus` transition table, `POST /variants/{id}/submit`, `/approve` and `/reject`, 409s with `currentStatus` and `attemptedAction`, `@Version` optimistic locking mapped to 409, and an end-to-end test running the real `ClaudeClient` against WireMock on Postgres. `./mvnw verify` passes: 32 suites, 336 tests. No real API calls were made in M4; the owner will run the approval flow against the real API with the curl commands from the M4 report. Next: M5 (packaging, API docs, README), when the owner says so.
+M5 complete: a multi-stage Docker image, the app in docker-compose under the `app` profile, springdoc-openapi 3.1.1 with Swagger UI and a test that every mapped endpoint is documented, a CI job that builds the image, and a rewritten README checked from a clean clone. `./mvnw verify` passes: 34 suites, 344 tests. No real API calls were made in M5. Next: M6 (AWS deployment), when the owner says so.
 
 ## Milestones
 
@@ -11,7 +11,7 @@ M4 complete: test isolation by truncation, the `VariantStatus` transition table,
 - [x] M2: Claude API client
 - [x] M3: Validator and generation endpoint
 - [x] M4: Approval workflow and end-to-end test
-- [ ] M5: Packaging, API docs, README
+- [x] M5: Packaging, API docs, README
 - [ ] M6: AWS deployment
 
 ## Session Log
@@ -171,6 +171,76 @@ M4 complete: test isolation by truncation, the `VariantStatus` transition table,
 - ADRs 031 to 033 added, plus the ADR-019 note. flow.md changed with commits 3 (response example, approval endpoints, 409 body and details, error table) and 4 (concurrency rule and detail). CLAUDE.md: structure to the end of M4, plus the truncation rule.
 - Not done (out of M4 scope): reopening rejected variants, editing variants (which would bring ETag/If-Match back, see ADR-033), roles and permissions.
 
+### 2026-10-31: M5
+
+- **Start checks:**
+  - progress.md marked M4 complete, and the `m4` tag was HEAD (`d62091b`) on a clean tree.
+  - `./mvnw verify` was green: 32 suites, 336 tests. A 33rd report, `ClaudeLiveSmokeTests` (18:05), was left over from the owner's live run.
+- **Docs read before planning:** CLAUDE.md, progress.md, plan.md M5, decisions.md, flow.md.
+- **Read-only research before planning:**
+  - springdoc's compatibility table maps Boot 4.1.x to 3.1.x–3.2.x. Parents: 3.1.1 → Boot 4.1.0, 3.2.0 → 4.1.2. The 3.1.1 changelog has the security fixes.
+  - The Boot 4.1 reference (Dockerfiles page) uses `-Djarmode=tools … extract --layers`; on our jar, `list-layers` shows four layers and `-Djarmode=layertools` fails with "Unsupported jarmode".
+  - The Docker Hub tags `eclipse-temurin:21.0.13_9-jdk-noble` and `…-jre-noble` exist.
+- **Owner decisions:**
+  - the plan approved, with springdoc **3.1.1** instead of 3.2.0 (3.2.0 was a week old, and the owner doesn't adopt releases younger than about two weeks)
+  - the CLAUDE.md edits approved
+  - no `m5` tag; the owner tags after review
+- **Commits, each with `verify` green:**
+  1. Dockerfile and .dockerignore (336 tests)
+  2. Compose app profile (336)
+  3. springdoc and the docs tests (344)
+  4. CI image build (344)
+  5. README, after the owner's review of the Claude Code section
+  6. These docs
+- **Image** (ADR-034):
+  - Size: 509 MB unpacked, 150 MB compressed. App layer 119 kB, dependencies 56 MB. Build context 122 kB.
+  - Cold build: 748 artifacts downloaded. After a one-line source change: 0, and 8.5 s for the Maven step.
+  - Runs as uid 999 (`app`). With `-m 512m`, `MaxHeapSize` is 384 MiB.
+- **Secret check on the image** (a script in the session scratchpad; it prints counts, never the key):
+  - It streams `docker export` through `tar -t` and `grep -a -c -F`, extracts only `/app`, and reads each of the 83 jars with `unzip -p`. It also checks `docker image inspect` (Env) and `docker history --no-trunc`.
+  - Results: no `.env` among 6068 filesystem entries. The real 106-character key from `.env`, `ANTHROPIC_API_KEY=` and `sk-ant-` each had 0 matches in the filesystem, the jars and the history.
+  - Positive controls found `VERSION_CODENAME=noble` (1) and the `${ANTHROPIC_API_KEY:}` placeholder in the jars, so the searches can find strings.
+  - The first two runs of the script were invalid; see the mistakes log.
+- **Compose** (ADR-035):
+  - `docker compose config` resolves the key from `.env` (length only), from the shell when it's set there, and to empty with an empty `--env-file`.
+  - In the running container: the key had 106 characters, and none of the app's log lines contained it. The app connected to `postgres:5432`, and health was `UP`.
+  - Plain `docker compose down` stopped Postgres but left the app running, so the documented teardown is `--profile app down`.
+  - Relaxed binding works in the container: `FRANCHISEADS_CLAUDE_MAXATTEMPTS=11` stopped startup with "must be less than or equal to 10".
+- **Host port 8080:** an app started outside this session (`spring-boot:run`, PID 7644, started 19:39:12, before this session) held 8080 the whole time. It wasn't stopped. Container checks used a temporary compose override file (scratchpad) mapping 18080, and the clone's host run used `--server.port=18081`.
+- **The owner's Postgres:** `franchiseads-postgres` was running at the start. It was taken down (volume kept) for the teardown check and for the clone run, whose fixed `container_name` collides with it, and started again each time. `down -v` ran only in the clone, on its own `fa-clone_postgres-data`.
+- **OpenAPI** (ADR-036): the tests were shown to fail on deliberate breaks, then the files were restored from backups:
+  - `@Hidden` on approve → the documented set differs from the mapped set
+  - a summary removed → `summary of GET /locations/{id}`
+  - 504 dropped from generate → the error set differs
+  - the 201 declaration removed → `["200"]` instead of `["201"]`
+  - the docs switch hard-coded on → `ApiDocsDisabledTests` got 200/302/200
+  - `override-with-generic-response: true` alone changed nothing; together with a `@ResponseStatus` on a handler it failed two tests (see the mistakes log)
+- **Request schemas** carry the Bean Validation limits (`maxLength`, `maxItems`, `required`).
+- **CI:** `actionlint` 1.7.7 (run once from Docker Hub, not a project dependency) passed the workflow, and the job's exact `docker build` command works locally. The real run happens on the owner's next push.
+- **Clean clone:** `git clone` of the repo into the scratchpad. On Windows the checkout is CRLF for `maven-wrapper.properties`, `Dockerfile` and `application.yml`; `mvnw` stays LF. Then the draft README's steps, run there:
+  - `Copy-Item .env.example .env`
+  - section 1: `--profile app up -d --build` (the image was built from the clone's context, with Maven inside), health `UP`, `/swagger-ui.html` → 302 → 200, `/v3/api-docs` 200, `--profile app down -v`
+  - section 2: `docker compose up -d`, `spring-boot:run`, health `UP`, Swagger UI 200; then stopped
+  - section 3: `.\mvnw.cmd verify` (344 tests in 34 suites, green, 1:06 min)
+
+  No README step failed. The clone was deleted afterwards.
+- **README review:**
+  - The owner replaced the division-of-work paragraph in "Built with Claude Code" with their own text, including four places they changed the plan.
+  - The ADR numbers in it were checked against decisions.md. All four match their subjects. The latency bullet's "deadline after a usable first attempt saves it instead of 504" is ADR-030's rule, so it now cites ADR-027 and ADR-030.
+- **Clean clone on 8080, rerun once the owner had stopped their app.** A fresh clone, and the README's PowerShell commands exactly as written:
+  - section 1: `--profile app up -d --build`. `curl.exe` health got "Empty reply" the instant `up` returned and `UP` a few seconds later, as the README says. `/swagger-ui.html` → `index.html` 200 (fetched with `curl.exe -L` instead of `start`, so no browser opened), `/v3/api-docs` 200, and `--profile app down` removed both containers.
+  - section 2: `docker compose up -d`, `.\mvnw.cmd spring-boot:run` (Tomcat on 8080), health `UP`; the app stopped, then `docker compose down`.
+  - section 3: `.\mvnw.cmd test -Dtest=AdCopyValidatorTests` (36 tests) and `.\mvnw.cmd verify` (344 tests, green, 1:02 min).
+
+  Then the clone's volume and the clone were deleted, and the owner's Postgres was started again.
+- **Disk:** C: had 234 MB–2 GB free during the session. To make room for the clone run, only the main repo's regenerable jars were deleted (`target/*.jar`); `target/surefire-reports`, with the owner's live report, was kept. Nothing of the owner's in Docker was pruned.
+- **Deviations from the approved plan:**
+  - The plan's claim about springdoc's generic responses was wrong. The setting stays as a guard, with the ADR and comment corrected.
+  - `actionlint` was used to validate the workflow.
+  - The first clean-clone run used alternate host ports. It was rerun on 8080, as written, once the port was free.
+  - Everything else as planned.
+- **Not done (out of M5 scope):** AWS deployment, publishing the image, a CDS/AOT cache. A HEALTHCHECK in the image wasn't needed for compose; M6's load balancer will check `/actuator/health`.
+
 ## Agent Mistakes Log
 
 | Date | What the agent got wrong | How it was caught | Fix |
@@ -195,4 +265,12 @@ M4 complete: test isolation by truncation, the `VariantStatus` transition table,
 | 2026-10-31 | Read the exit code of a background PowerShell `verify` job as Maven's result. It was the exit code of the job's last statement, a string, so it's always 0. Committed `02cc666` (docs only) in the same command that printed the log tail, before confirming the build | Own re-check right after the commit: the log tail showed no Maven summary | Confirmed from the log (no `[ERROR]`) and the surefire reports (168 tests, 0 failures) that this `verify` had passed. Every later run captures `$LASTEXITCODE` straight after `mvnw` and checks the reports before committing |
 | 2026-10-31 | Put a Python edit script for `VariantControllerTests` inline in a bash heredoc again; bash failed to parse it (`unexpected EOF while looking for matching '`). This is the same mistake as the earlier heredoc row, which already recorded the fix | The command's own error; no file had been changed (checked with `git status`) | Wrote the script with the Write tool into the scratchpad and ran it from there, as the earlier fix says. Every later edit script in M4 went through a file |
 | 2026-10-31 | Put a reference to ADR-033 in `AdVariant`'s Javadoc in the state-machine commit, when ADR-033 only lands in the optimistic-locking commit. That would have repeated the M3 dangling-reference problem the plan was built to avoid | Own re-check of the diff before running `verify` | Removed the sentence before the commit and added it back in the locking commit, together with ADR-033 |
+| 2026-10-31 | M5: wrote the first image secret-check script without `set -e`/`pipefail`. During the run the disk filled up (`docker export` stopped at 1232 of 6068 entries), and `docker cp` failed because `MSYS_NO_PATHCONV=1` passed a Git Bash path to a Windows program. The script still printed "none" and 0 matches for everything, a pass made of failures | The error lines in the same output ("not enough space on the disk", "invalid output path", "Unexpected EOF") | Treated the run as void. Rewrote the script: `set -euo pipefail`, every `docker export` streamed (nothing written to disk) and its exit status checked through `PIPESTATUS`, only `/app` extracted, and positive controls that must find a known string. The proof in the session log comes from that version |
+| 2026-10-31 | M5: in the rewritten script, `stream_count` joined `grep -c`'s output and the pipe statuses on two lines, but `read` only reads one line, so the status checks would have read empty values. Two leftover lines assigned an unused variable | Own re-read of the script before running it | Joined the lines with `tr` before `read` and removed the leftovers |
+| 2026-10-31 | M5: the script read `BOOT-INF/classes/application.yml` from `application.jar`. After `-Djarmode=tools extract`, `application.jar` is a thin jar with `application.yml` at its root, so the script stopped (exit 1) before the image config and history checks | The script's own exit code under `set -e` | Read `application.yml` from the jar's root and reran the whole check for one complete output |
+| 2026-10-31 | M5: the plan said springdoc's default `override-with-generic-response=true` would put every `@ExceptionHandler`'s status (502/503/504) on every operation, e.g. `GET /brands`. That came from memory, not a check | The mutation run: with the setting `true`, all OpenAPI tests still passed | An experiment showed the setting matters only for handlers that declare `@ResponseStatus`, and ours return `ProblemDetail` without one. With `@ResponseStatus(NOT_FOUND)` added and the setting on, `GET /brands` gained a 404 and two tests failed; with it off, they passed. The setting stays as a guard; ADR-036 and the `application.yml` comment say what it actually does |
+| 2026-10-31 | M5: the first `docker compose --profile app up` failed to bind host port 8080, and the next command's `curl localhost:8080/actuator/health` still printed `UP`. That answer came from another FranchiseAds instance already on the host, not from the container | Read the `up` output ("Ports are not available … 8080") before reporting anything; `/brands` returned the owner's data from an earlier run | Found the owner (`netstat -ano`: PID 7644, a `spring-boot:run` started before the session) and left it running. All container checks used a temporary override mapping 18080. `Get-NetTCPConnection` returned nothing here, the same blind spot as the M0 row; `netstat -ano` is the tool that works |
+| 2026-10-31 | M5: put a Python edit (adding a mutation) in a bash heredoc with `\\t`/`\\n` escapes; the heredoc wrote a real tab and newline into a Python string literal, which is a syntax error. A third heredoc row, after the two earlier ones | `grep` of the script right after the edit, before running it | Fixed the lines with the Edit tool. Edits to scratchpad scripts now go through Edit/Write only |
+| 2026-10-31 | M5: left a dead `for` loop with a placeholder comment in `OpenApiDocumentationTests` | IDE diagnostics ("value of the local variable code is not used") right after writing the file | Removed the loop before running the tests |
+| 2026-10-31 | M5: the first draft of ADR-036 said Spring MVC "still serializes with Jackson 3" with Jackson 2 on the classpath. Nothing had checked which converter is used; only the existing JSON tests had passed | Own re-read of the ADR before committing | Reworded to what was shown: every existing JSON-asserting test passes unchanged |
 | 2026-10-31 | Ran the `@Version` regression check by just deleting the annotation. The `version` field then stayed null, the insert in the test setup hit the not-null column, and both tests errored before reaching the stale write. That proved nothing about the lock | Both tests failed with errors (not failures), the control test included. The cause was `null value in column "version" ... violates not-null constraint` | Reran with the annotation removed and the field initialized to `0L`, after moving the version precondition out of `@BeforeEach`. The stale reject then returned 200 instead of 409, which is the counterfactual the test is meant to catch |

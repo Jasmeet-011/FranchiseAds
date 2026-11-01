@@ -23,7 +23,8 @@ This is a portfolio project. Correctness, test quality, and honest documentation
 - Spring Boot 4.1.x: Web MVC, Data JPA (Hibernate), Validation, Actuator, Flyway
 - PostgreSQL 16 (docker-compose locally, Testcontainers in tests)
 - Tests: JUnit (version managed by Boot, currently 6), Mockito, MockMvc, Testcontainers 2.x, WireMock (`org.wiremock:wiremock-standalone` 3.13.2, shaded; ADR-019)
-- Added later: springdoc-openapi (M5)
+- API docs: springdoc-openapi 3.1.1 (`springdoc-openapi-starter-webmvc-ui`, ADR-036), switched by `API_DOCS_ENABLED`
+- Packaging: multi-stage `Dockerfile` (Temurin 21.0.13+9 JDK/JRE, ADR-034), `docker-compose.yml` with the app under the `app` profile (ADR-035)
 
 ## Commands
 
@@ -37,6 +38,9 @@ Windows (PowerShell):
 .\mvnw.cmd test "-Dtest=com.franchiseads.ClassName#method"  # quote -D args containing '.' in PowerShell
 docker compose up -d              # local Postgres
 docker compose down               # stop it (volume kept)
+docker build -t franchiseads:local .                # the image (tests skipped inside; ADR-034)
+docker compose --profile app up -d --build          # app + Postgres in Docker, app on :8080
+docker compose --profile app down                   # plain "down" leaves the app container running
 .\mvnw.cmd spring-boot:run        # run against docker-compose Postgres
 .\mvnw.cmd spring-boot:test-run   # run with a Testcontainers Postgres, no compose needed
 curl http://localhost:8080/actuator/health
@@ -67,7 +71,7 @@ Rule: confirm every Spring class, annotation, import, and property exists in the
 
 Package by feature. Each feature owns its entity, repository, service, controller, and DTOs.
 
-Exists today (end of M4):
+Exists today (end of M5):
 
 ```
 src/main/java/com/franchiseads/
@@ -86,7 +90,8 @@ src/main/java/com/franchiseads/
               AdBrief, Prompt, PromptBuilder, AdCopy, AdCopyParser, MalformedAdCopyException (pure)
   validation/ AdCopyValidator, Violation (pure), AdCopyRules (+ AdCopyRulesConfiguration)
   common/     Strings (input normalization), config/ClockConfiguration, error/ (GlobalExceptionHandler,
-              ResourceNotFoundException)
+              ResourceNotFoundException), openapi/ (OpenApiConfiguration, @ProblemResponses: per-endpoint
+              ProblemDetail responses as shared $refs)
 src/main/resources/application.yml         all config, env vars with local defaults
 src/main/resources/db/migration/V1__init.sql
 src/test/java/com/franchiseads/
@@ -103,7 +108,8 @@ src/test/java/com/franchiseads/
   validation/ AdCopyValidatorTests (plain JUnit)
   variant/    VariantStatusTests, AdVariantTests (plain JUnit), VariantOptimisticLockingTests (@Version over HTTP,
               deterministic via @MockitoSpyBean on the repository)
-docker-compose.yml, .env.example, .github/workflows/ci.yml, docs/
+  common/openapi/ OpenApiDocumentationTests (every mapped endpoint documented, errors per flow.md), ApiDocsDisabledTests
+Dockerfile, .dockerignore (allowlist), docker-compose.yml, .env.example, .github/workflows/ci.yml (verify + image build), docs/
 ```
 
 Tests that write through a full Spring context declare `@ExtendWith(TruncateTablesExtension.class)`: every application table (not `flyway_schema_history`) is truncated with `RESTART IDENTITY CASCADE` before each test (ADR-031), so no test sees another's rows and IDs start at 1. `@DataJpaTest` classes roll back instead and don't need it.
