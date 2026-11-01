@@ -288,3 +288,25 @@ Spring 7.0.10's `JdkClientHttpRequestFactory` only has a factory-level `setReadT
 - every error response points at the shared definitions
 
 Each check was shown to fail on a deliberate break: an endpoint hidden with `@Hidden`, a summary removed, 504 dropped from generate, the 201 declaration removed (springdoc then documents 200), and the generic-response case above. `ApiDocsDisabledTests` failed (200/302/200) with the switch hard-coded on. The test table and `@ProblemResponses` have to be kept in step with flow.md by hand.
+
+## ADR-037: CORS for a local UI through `WebMvcConfigurer`; exact origins from `CORS_ALLOWED_ORIGINS`
+
+**Context:** A local review console (a separate repo, built with Lovable, served by Vite on port 5173) calls the API from the browser. Without CORS headers the browser blocks every call. The API has no auth and no cookies.
+**Decision:**
+- `WebCorsConfiguration.addCorsMappings` registers `/**` for every Spring MVC endpoint, `/v3/api-docs` included:
+  - origins: `franchiseads.cors.allowed-origins` (`CorsProperties`, env `CORS_ALLOWED_ORIGINS`, comma-separated)
+  - methods: `GET`, `POST`, `OPTIONS`; the API has no other
+  - request header: `Content-Type`
+  - exposed: `Location`, so the UI can read a created resource's URL
+  - no credentials; `max-age` stays at Spring's 1800s
+- **Default: `http://localhost:5173,http://127.0.0.1:5173`.** Browsers treat the two hosts as different origins, and Vite can be opened with either. The default is in `CorsProperties` (`@DefaultValue`), `application.yml` and `docker-compose.yml`, like the other passed-through settings.
+- **Exact origins only.** `allowedOrigins`, not `allowedOriginPatterns`, and no `*` in the default. Each entry must be non-blank and the list non-empty. A set but empty `CORS_ALLOWED_ORIGINS` binds to an empty list (not the default, unlike the scalar `ANTHROPIC_EFFORT`), so it stops startup with a message naming the property.
+- Rejected: a servlet `CorsFilter` bean. It would also cover actuator, which the UI doesn't need. `addCorsMappings` is MVC's own route, and the `@WebMvcTest` slice exercises it.
+
+**Consequences:**
+- Spring's CORS processor rejects a request from another origin with **403** and a plain-text `Invalid CORS request`, before any controller runs. It also rejects a preflight that asks for a method or header that isn't allowed. flow.md lists the 403; it's not a `ProblemDetail` and isn't documented per endpoint, like 500.
+- **A partly allowed preflight isn't rejected.** Asking for `content-type, authorization` gets 200 with only `content-type` allowed; the browser then refuses the request.
+- Requests without `Origin` (curl, Swagger UI on the same origin, server-to-server) are unaffected. CORS is enforced by browsers and isn't access control: anything that isn't a browser can still call the API.
+- Actuator endpoints get no CORS headers (`management.endpoints.web.cors.*` is unset).
+- `CorsConfigurationTests` (`@WebMvcTest`, a stub controller, origins set in the test) covers allowed and other-origin preflights, a disallowed method and header, `Location` exposed on a 201, CORS headers on a 400 `ProblemDetail`, and no headers without `Origin`. With the mapping removed, 9 of its 10 tests failed: other-origin requests got 200 instead of 403, and allowed origins got no `Access-Control-Allow-*` headers. The no-`Origin` control passed, as it should. `CorsPropertiesTests` pins the default, trimming, and the empty and blank failures.
+- M6 decides the production origins. The localhost default does no harm on a server, but should be replaced once a hosted UI exists.

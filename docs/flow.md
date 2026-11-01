@@ -200,6 +200,9 @@ All errors are `ProblemDetail` (RFC 9457). Internal details and stack traces are
 | Claude 429 or 5xx after all retries, and no call produced parseable copy | 503 |
 | Claude timed out after all retries, or the 50s request deadline ran out, and no call produced parseable copy | 504 |
 | Anything unexpected, including an unmapped database integrity violation | 500, generic message, logged at ERROR |
+| A request with an `Origin` not in `CORS_ALLOWED_ORIGINS`, or a preflight asking only for a method or header that isn't allowed | 403, plain-text `Invalid CORS request` from Spring's CORS processor, not a `ProblemDetail`; no controller runs (ADR-037) |
+
+The CORS 403 isn't documented per endpoint in the OpenAPI document, the same as 500. Requests without an `Origin` header (curl, Swagger UI on the same origin) are never affected. A preflight that asks for an allowed and an unlisted header gets 200 with only the allowed one in `Access-Control-Allow-Headers`, and the browser then blocks the request itself.
 
 ## Latency budget
 

@@ -161,6 +161,7 @@ Everything comes from environment variables, and a `.env` in the working directo
 | `ANTHROPIC_MODEL` | `claude-haiku-5-5` | Model ID sent with every request. |
 | `ANTHROPIC_EFFORT` | `low` | Sent as `output_config.effort` (`low`, `medium`, `high`, `xhigh`, `max`). `none` leaves the field out, for models without effort support such as Haiku 4.5. |
 | `API_DOCS_ENABLED` | `true` | `false` turns off `/v3/api-docs` and Swagger UI (both then 404). |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Comma-separated browser origins allowed to call the API (`GET`, `POST`, `Content-Type`, `Location` exposed, no credentials). Exact origins only; browsers treat `localhost` and `127.0.0.1` as different. Any other origin gets 403. Set but empty, startup fails. |
 | `JAVA_TOOL_OPTIONS` | `-XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError` | Docker image only: JVM flags. The heap is sized from the container's memory limit. |
 
 The tuning knobs have defaults in code and are rarely changed. Each can be set through Spring's relaxed binding, for example `FRANCHISEADS_CLAUDE_MAXATTEMPTS=5` for `franchiseads.claude.max-attempts`. Out-of-range values stop startup with a message naming the property.
