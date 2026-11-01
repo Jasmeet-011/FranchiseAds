@@ -246,3 +246,21 @@ Spring 7.0.10's `JdkClientHttpRequestFactory` only has a factory-level `setReadT
 - Not done: a CDS or AOT-cache training run. It needs a context refresh, and that connects to the database.
 
 **Consequences:** 509 MB unpacked, 150 MB compressed, most of it the JRE base. No `HEALTHCHECK` in the image: compose doesn't need one, and the M6 load balancer checks `/actuator/health` itself. Checked on the built image (commands in the M5 session log): no `.env` file, and neither the key from the local `.env`, `ANTHROPIC_API_KEY=` nor `sk-ant-` appears anywhere in the filesystem, the jars, the image config or the build history.
+
+## ADR-035: The app runs in compose under an `app` profile; `DB_URL` is fixed to the service name
+
+**Context:** `docker compose up -d` has started only Postgres since M0, for running the app on the host. M5 adds a full-stack option without changing that. The local `.env` serves both setups, and its `DB_URL` (when set) points at `localhost`, which inside a container is the container itself.
+**Decision:**
+- An `app` service with `profiles: [app]`, `build: .`, `image: franchiseads:local`, port 8080, and `depends_on: postgres: condition: service_healthy` (the existing `pg_isready` healthcheck).
+- **`DB_URL`** is written literally as `jdbc:postgresql://postgres:5432/franchiseads`, not interpolated: `.env`'s `DB_URL` stays a host-run setting and can't break the container. `DB_USERNAME`/`DB_PASSWORD` use the same `${…:-franchiseads}` as the Postgres service, so the two always agree.
+- **`ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}`**: compose fills it at `up` time from the shell or `.env`, a shell value winning. The compose file has no value and the image has none (ADR-034). Without either it's empty, the app still starts, and generation answers 502 (ADR-021).
+- **`ANTHROPIC_MODEL`/`ANTHROPIC_EFFORT`** repeat `application.yml`'s defaults. Passing an unset variable through as empty would override them: an empty model fails `@NotBlank` at startup.
+
+**Consequences:**
+- Plain `docker compose up -d` still starts only Postgres; `docker compose --profile app up -d --build` starts both.
+- **Teardown needs the profile:** plain `docker compose down` stopped Postgres but left the app running (and the network, "still in use"). `docker compose --profile app down` removes both.
+- The host port is 8080 for both ways of running, so a host `spring-boot:run` and the compose app can't run at the same time.
+- Checked:
+  - `docker compose config` shows the key from `.env` (length only), the shell override winning, and an empty key with an empty `--env-file`.
+  - Inside the container the key had the same 106 characters, and none of the app's log lines contained it.
+  - The app connected to `jdbc:postgresql://postgres:5432/franchiseads`, and `/actuator/health` from the host returned `UP`.

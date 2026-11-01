@@ -16,5 +16,27 @@ services:
       timeout: 5s
       retries: 10
 
+  # Full stack: docker compose --profile app up -d --build. Plain "docker compose up -d" starts only Postgres (ADR-035).
+  app:
+    profiles: [app]
+    build: .
+    image: franchiseads:local
+    container_name: franchiseads-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Postgres by its service name. Not taken from .env, whose DB_URL is for running the app on the host.
+      DB_URL: jdbc:postgresql://postgres:5432/franchiseads
+      DB_USERNAME: ${DB_USERNAME:-franchiseads}
+      DB_PASSWORD: ${DB_PASSWORD:-franchiseads}
+      # Passed through from the shell or .env at "up" time; never stored in this file or the image.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Defaults repeat application.yml's: an empty ANTHROPIC_MODEL would fail startup instead of falling back.
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-haiku-5-5}
+      ANTHROPIC_EFFORT: ${ANTHROPIC_EFFORT:-low}
+    ports:
+      - "8080:8080"
+
 volumes:
   postgres-data:
